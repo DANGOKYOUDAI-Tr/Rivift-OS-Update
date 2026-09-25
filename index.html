@@ -9,7 +9,54 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta http-equiv="Content-Security-Policy"
         content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://esm.run https://esm.sh https://cdn.jsdelivr.net https://cdn.socket.io; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; media-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; font-src * data: blob:; worker-src * blob: data:; object-src 'none'; frame-ancestors 'self';">
-    <title>Rivift OS</title>
+        <title>Rivift OS</title>
+    <script id="rivift-system-bootloader">
+    // ── Rivift OS インライン・ブートローダー ──
+    // 単一HTML完結アーキテクチャ:
+    // OSアップデートで取得された最新バージョンのHTMLがIndexedDBに保存されている場合、
+    // サーバーや外部ファイルに一切依存せず、ブラウザ内ストレージから最新OSを即座にブートする。
+    (function() {
+        if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
+        try {
+            const CURRENT_FILE_VERSION = '5.2.5';
+            const req = indexedDB.open('rivift-system-store', 1);
+            req.onupgradeneeded = function(e) {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('system')) db.createObjectStore('system');
+            };
+            req.onsuccess = function(e) {
+                const db = e.target.result;
+                const tx = db.transaction('system', 'readonly');
+                const store = tx.objectStore('system');
+                const getReq = store.get('updated-os');
+                getReq.onsuccess = function() {
+                    const item = getReq.result;
+                    if (item && item.html && item.version) {
+                        const clean = function(v) { return String(v || '').replace(/^v/i, '').trim(); };
+                        const pa = clean(item.version).split('.').map(function(n) { return parseInt(n, 10); });
+                        const pb = clean(CURRENT_FILE_VERSION).split('.').map(function(n) { return parseInt(n, 10); });
+                        let isNewer = false;
+                        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                            const na = pa[i] || 0, nb = pb[i] || 0;
+                            if (na > nb) { isNewer = true; break; }
+                            if (na < nb) { isNewer = false; break; }
+                        }
+                        if (isNewer && item.html.length > 500000 && !window.__RIVIFT_BOOTED_FROM_STORAGE__) {
+                            window.__RIVIFT_BOOTED_FROM_STORAGE__ = true;
+                            console.log('[Rivift Bootloader] 最新のOS (ver.' + item.version + ') をIndexedDBからブートします');
+                            try { if (window.stop) window.stop(); } catch (err) {}
+                            document.open();
+                            document.write(item.html);
+                            document.close();
+                        }
+                    }
+                };
+            };
+        } catch (e) {
+            console.warn('[Rivift Bootloader] スキップ:', e);
+        }
+    })();
+    </script>
 
     <link rel="icon" href="icons/favicon.ico" sizes="any">
     <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
@@ -69949,10 +69996,6 @@ RiviftConnect.connectToServer = function () {
                 } else if (primary) {
                     urls.push(primary);
                 }
-                // riviftFetchLatestReleaseInfoがGitHub API経由で取得した場合、
-                // rawの方(primary)を優先候補に入れつつ、元のAsset URLからも
-                // jsDelivr形式の候補を追加しておく(rawが何らかの理由で
-                // 対象コミットにファイルが無い等で失敗した場合の保険)。
                 const assetUrl = releaseInfo?.assetDownloadUrl;
                 if (assetUrl && !urls.includes(assetUrl)) {
                     const m = assetUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/);
@@ -69960,8 +70003,12 @@ RiviftConnect.connectToServer = function () {
                         const [, owner, repo, tag, file] = m;
                         urls.push(`https://cdn.jsdelivr.net/gh/${owner}/${repo}@${tag}/${file}`);
                     }
-                    urls.push(assetUrl); // 最終手段(CORSで失敗する可能性が高いが一応)
+                    urls.push(assetUrl);
                 }
+                // 保険としてリポジトリのmainブランチ直接URLも候補に追加
+                const { owner, repo } = (typeof RIVIFT_UPDATE_CONFIG !== 'undefined' ? RIVIFT_UPDATE_CONFIG : { owner: 'DANGOKYOUDAI-Tr', repo: 'Rivift-OS-Update' });
+                const mainRaw = `https://raw.githubusercontent.com/${owner}/${repo}/main/index.html`;
+                if (!urls.includes(mainRaw)) urls.push(mainRaw);
                 return urls;
             }
 
@@ -69978,8 +70025,8 @@ RiviftConnect.connectToServer = function () {
                         throw new Error('ダウンロードURLが取得できていません');
                     }
 
-                    overlay.setText('最新版をダウンロード中...');
-                    overlay.setProgress(20);
+                    overlay.setText('最新版のシステムファイルをダウンロード中...');
+                    overlay.setProgress(25);
                     const candidates = _riviftBuildDownloadCandidates(releaseInfo);
                     let newContent = null;
                     let lastError = null;
@@ -69987,8 +70034,11 @@ RiviftConnect.connectToServer = function () {
                         try {
                             const res = await fetch(url);
                             if (!res.ok) { lastError = new Error(`ダウンロード失敗: ${res.status} (${url})`); continue; }
-                            newContent = await res.text();
-                            break;
+                            const text = await res.text();
+                            if (text && text.includes('<!DOCTYPE html>') && text.includes('Rivift OS')) {
+                                newContent = text;
+                                break;
+                            }
                         } catch (e) {
                             lastError = e;
                         }
@@ -69997,57 +70047,71 @@ RiviftConnect.connectToServer = function () {
                         throw lastError || new Error('すべての配信元からのダウンロードに失敗しました');
                     }
                     overlay.setProgress(60);
+                    overlay.setText('ブラウザ内システム領域 (IndexedDB) に保存中...');
 
+                    // ── 単一HTML完結: IndexedDB (rivift-system-store) に最新OSを永続保存 ──
+                    await new Promise((resolve, reject) => {
+                        const req = indexedDB.open('rivift-system-store', 1);
+                        req.onupgradeneeded = (e) => {
+                            const db = e.target.result;
+                            if (!db.objectStoreNames.contains('system')) db.createObjectStore('system');
+                        };
+                        req.onsuccess = (e) => {
+                            const db = e.target.result;
+                            const tx = db.transaction('system', 'readwrite');
+                            tx.objectStore('system').put({
+                                version: releaseInfo.version,
+                                html: newContent,
+                                updatedAt: Date.now()
+                            }, 'updated-os');
+                            tx.oncomplete = () => resolve();
+                            tx.onerror = () => reject(tx.error);
+                        };
+                        req.onerror = () => reject(req.error);
+                    });
+                    console.log('[riviftPerformUpdate] IndexedDBにバージョン', releaseInfo.version, 'を永続化しました');
+
+                    // ── ローカルファイルモード (file://) の場合は File System Access API ──
                     if (_riviftIsLocalFileMode()) {
-                        // ── ローカル版: File System Access APIで自己書き換え ──
-                        if (!_riviftSupportsFileSystemAccess()) {
-                            overlay.remove();
+                        if (_riviftSupportsFileSystemAccess()) {
+                            let handle = await _riviftUpdateDB.getHandle('index-html-handle');
+                            if (handle) {
+                                const perm = await handle.queryPermission({ mode: 'readwrite' });
+                                if (perm === 'granted' || (await handle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+                                    const writable = await handle.createWritable();
+                                    await writable.write(newContent);
+                                    await writable.close();
+                                }
+                            }
+                        } else {
                             await riviftFallbackDownload(newContent, releaseInfo);
-                            return;
                         }
-                        overlay.setText('ファイルを保存中...');
-                        let handle = await _riviftUpdateDB.getHandle('index-html-handle');
-                        if (handle) {
-                            // 権限確認。無ければユーザー操作の文脈内で再要求する。
-                            const perm = await handle.queryPermission({ mode: 'readwrite' });
-                            if (perm !== 'granted') {
-                                const req = await handle.requestPermission({ mode: 'readwrite' });
-                                if (req !== 'granted') handle = null;
-                            }
-                        }
-                        if (!handle) {
-                            // 初回、または権限が失われた場合はユーザーに選び直してもらう。
-                            overlay.remove();
-                            const confirmed = await riviftPromptSelectFileForUpdate();
-                            if (!confirmed) return; // ユーザーがキャンセル
-                            handle = await _riviftUpdateDB.getHandle('index-html-handle');
-                            if (!handle) throw new Error('ファイルハンドルの取得に失敗しました');
-                            return riviftPerformUpdate(releaseInfo); // ハンドル取得後にやり直し
-                        }
-                        const writable = await handle.createWritable();
-                        await writable.write(newContent);
-                        await writable.close();
-                        overlay.setProgress(100);
-                        overlay.setText('完了しました。再読み込みします...');
-                        setTimeout(() => location.reload(), 1200);
-                    } else {
-                        // ── サーバー版(Firebase等): キャッシュ破棄＋reload ──
-                        // Service Workerは現状未導入のため、Cache Storage APIの
-                        // キャッシュのみ破棄する。導入時は別途対応が必要。
-                        overlay.setText('キャッシュを更新中...');
-                        overlay.setProgress(80);
-                        try {
-                            if ('caches' in window) {
-                                const keys = await caches.keys();
-                                await Promise.all(keys.map(k => caches.delete(k)));
-                            }
-                        } catch (e) {
-                            console.warn('[riviftPerformUpdate] キャッシュ破棄に失敗（続行）:', e);
-                        }
-                        overlay.setProgress(100);
-                        overlay.setText('完了しました。再読み込みします...');
-                        setTimeout(() => location.reload(true), 1000);
                     }
+
+                    // ── CacheStorage も同期（対応環境用） ──
+                    overlay.setProgress(85);
+                    overlay.setText('キャッシュを同期中...');
+                    try {
+                        if ('caches' in window) {
+                            const cache = await caches.open('rivift-runtime-cache');
+                            await cache.put('/', new Response(newContent, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
+                            await cache.put('/index.html', new Response(newContent, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
+                        }
+                    } catch (e) {
+                        console.warn('[riviftPerformUpdate] CacheStorage同期スキップ:', e);
+                    }
+
+                    try {
+                        localStorage.setItem('riviftUpdatedVersion', releaseInfo.version);
+                        localStorage.setItem('riviftLastUpdateSuccess', JSON.stringify({ version: releaseInfo.version, date: new Date().toISOString() }));
+                    } catch (e) { }
+
+                    overlay.setProgress(100);
+                    overlay.setText(`バージョン ${releaseInfo.version} へのアップデート完了！再読み込みします...`);
+                    setTimeout(() => {
+                        location.reload(true);
+                    }, 1200);
+
                 } catch (e) {
                     console.error('[riviftPerformUpdate] アップデート失敗:', e);
                     overlay.setText(`アップデートに失敗しました: ${e.message}`);
@@ -70056,8 +70120,6 @@ RiviftConnect.connectToServer = function () {
                 }
             }
 
-            // 非対応ブラウザ(Firefox/Safari)やfile://で権限が取れない場合の
-            // フォールバック：ダウンロードフォルダに保存してもらい手動差し替えを案内。
             async function riviftFallbackDownload(content, releaseInfo) {
                 const blob = new Blob([content], { type: 'text/html' });
                 const url = URL.createObjectURL(blob);
