@@ -16388,7 +16388,7 @@
             // ここに単一の定数として新設し、表示側・更新チェック側の両方から
             // この値だけを参照するようにする。
             // ==========================================================
-            const RIVIFT_OS_VERSION = '5.2.2';
+            const RIVIFT_OS_VERSION = '5.2.4';
 
             // GitHub Releases配信元の設定。
             // [FIX] owner/repoは未確定のため仮値。実運用時にここを書き換えるだけで
@@ -16407,7 +16407,7 @@
                 // 別の完全public リポジトリに、バージョン番号・リリースノート・
                 // ダウンロードURLだけを書いた軽量JSON（例: manifest.json）を置く運用。
                 // 未設定（null）ならフォールバックせず、401ならエラー表示にする。
-                manifestFallbackUrl: null,
+                manifestFallbackUrl: 'https://raw.githubusercontent.com/DANGOKYOUDAI-Tr/Rivift-OS-Cycle/main/manifest.json',
             };
 
             // ==========================================================
@@ -60155,82 +60155,103 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             const styleEl = document.createElement('style');
                             styleEl.id = 'mc2-style';
                             styleEl.textContent = `
-            .mc2-app { display: flex; flex-direction: column; height: 100%; background: #14161a; color: #e8ecf2; font-family: 'Red Hat Display', -apple-system, BlinkMacSystemFont, sans-serif; user-select: none; }
+            .mc2-app { display: flex; flex-direction: column; height: 100%; background: var(--window-bg); color: var(--text-color); font-family: 'Red Hat Display', -apple-system, BlinkMacSystemFont, sans-serif; user-select: none; }
 
-            .mc2-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.08); background: #1a1c21; flex-wrap: wrap; }
-            .mc2-btn { font-size: 0.8rem; color: #a8b0bd; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: all 0.12s ease; padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; height: 32px; box-sizing: border-box; }
-            .mc2-btn:hover { background: rgba(255,255,255,0.11); color: #fff; }
-            .mc2-btn:active { transform: scale(0.96); }
-            .mc2-btn.mc2-primary { background: linear-gradient(135deg, #7c5cff, #4f7dff); color: #fff; border: none; }
-            .mc2-btn.mc2-primary:hover { filter: brightness(1.1); }
-            .mc2-btn.mc2-playing { background: #ef4444; border-color: #ef4444; color: #fff; }
+            /* ── ヘッダー: タイトル・ファイル操作・再生コントロールのみに限定 ── */
+            .mc2-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border-color); background: var(--header-bg); flex-shrink: 0; }
+            .mc2-btn { font-size: 0.8rem; color: var(--text-color); background: var(--input-bg); border: 1px solid var(--input-border); cursor: pointer; transition: background 0.12s ease; padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; height: 32px; box-sizing: border-box; }
+            .mc2-btn:hover { background: var(--context-menu-item-hover-bg); }
+            .mc2-btn:active { opacity: 0.75; }
+            .mc2-btn.mc2-primary { background: var(--accent-color); color: var(--accent-color-text); border-color: var(--accent-color); }
+            .mc2-btn.mc2-primary:hover { background: var(--accent-color-hover); }
+            .mc2-btn.mc2-playing { background: #e5484d; border-color: #e5484d; color: #fff; }
             .mc2-icon-btn { width: 32px; padding: 0; justify-content: center; }
+            .mc2-btn i, .mc2-icon-btn i { font-size: 0.85rem; }
 
-            .mc2-field { display: flex; flex-direction: column; gap: 2px; }
-            .mc2-field label { font-size: 0.6rem; color: #7c8494; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-            .mc2-field select, .mc2-field input[type=number] { background: #23262e; color: #e8ecf2; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 5px 6px; font-size: 0.78rem; outline: none; height: 28px; box-sizing: border-box; }
-            .mc2-field select:focus, .mc2-field input:focus { border-color: #7c5cff; }
-            #mc2-title { background: transparent; border: 1px solid transparent; color: #fff; font-weight: 700; font-size: 0.9rem; padding: 4px 8px; border-radius: 6px; outline: none; width: 160px; }
-            #mc2-title:hover { border-color: rgba(255,255,255,0.15); }
-            #mc2-title:focus { border-color: #7c5cff; background: rgba(0,0,0,0.3); }
+            #mc2-title { background: transparent; border: 1px solid transparent; color: var(--text-color); font-weight: 600; font-size: 0.9rem; padding: 4px 8px; border-radius: 6px; outline: none; width: 180px; }
+            #mc2-title:hover { border-color: var(--border-color); }
+            #mc2-title:focus { border-color: var(--accent-color); background: var(--input-bg); }
 
-            .mc2-sep { width: 1px; height: 22px; background: rgba(255,255,255,0.1); margin: 0 2px; }
+            .mc2-sep { width: 1px; height: 22px; background: var(--border-color); margin: 0 2px; }
             .mc2-spacer { flex: 1; }
-            .mc2-time { font-family: 'DM Mono', monospace; font-size: 0.78rem; color: #b39dff; background: #0e0f13; border: 1px solid rgba(124,92,255,0.3); border-radius: 6px; padding: 5px 10px; height: 28px; display: flex; align-items: center; font-weight: 700; }
+            .mc2-time { font-family: 'DM Mono', monospace; font-size: 0.78rem; color: var(--text-color); background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 10px; height: 32px; box-sizing: border-box; display: flex; align-items: center; font-weight: 600; }
 
-            /* Track Tabs */
-            .mc2-tracks-bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #17191d; border-bottom: 1px solid rgba(255,255,255,0.06); overflow-x: auto; }
-            .mc2-track-chip { display: flex; align-items: center; gap: 7px; padding: 5px 6px 5px 10px; border-radius: 20px; background: #23262e; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; transition: all 0.12s; }
-            .mc2-track-chip.mc2-active { background: rgba(255,255,255,0.06); }
-            .mc2-track-chip-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-            .mc2-track-chip-name { font-size: 0.76rem; font-weight: 700; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: none; color: #fff; outline: none; }
-            .mc2-track-chip-btn { width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(255,255,255,0.08); color: #a8b0bd; font-size: 0.62rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
-            .mc2-track-chip-btn:hover { background: rgba(255,255,255,0.18); color: #fff; }
-            .mc2-track-chip-btn.mc2-muted { background: #ef4444; color: #fff; }
-            .mc2-add-track-btn { flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; background: rgba(124,92,255,0.15); border: 1px dashed rgba(124,92,255,0.5); color: #b39dff; font-size: 0.76rem; font-weight: 700; cursor: pointer; }
-            .mc2-add-track-btn:hover { background: rgba(124,92,255,0.28); }
+            /* ── 本体: サイドバー(トラック) + メイン(設定バー・グリッド) の左右分割 ── */
+            .mc2-body { display: flex; flex: 1; min-height: 0; }
 
-            .mc2-inst-popover { position: fixed; background: #1e2027; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.55); width: 240px; max-height: 320px; overflow-y: auto; z-index: 200; padding: 6px; }
-            .mc2-inst-cat { font-size: 0.62rem; font-weight: 800; text-transform: uppercase; color: #7c5cff; padding: 6px 8px 2px; letter-spacing: 0.05em; }
-            .mc2-inst-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 8px; background: none; border: none; color: #e8ecf2; font-size: 0.78rem; cursor: pointer; border-radius: 6px; }
-            .mc2-inst-item:hover { background: rgba(255,255,255,0.08); }
-            .mc2-inst-item i { width: 16px; text-align: center; color: #7c5cff; }
+            /* サイドバー: トラック管理専用エリア */
+            .mc2-sidebar { width: 210px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border-color); background: var(--sidebar-bg); overflow: hidden; }
+            .mc2-sidebar-head { padding: 10px 12px 8px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-color); opacity: 0.55; flex-shrink: 0; }
+            .mc2-track-list { flex: 1; overflow-y: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 4px; }
+            .mc2-track-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; background: transparent; border: 1px solid transparent; cursor: pointer; transition: background 0.12s; }
+            .mc2-track-row:hover { background: var(--input-bg); }
+            .mc2-track-row.mc2-active { background: var(--input-bg); border-color: var(--border-color); }
+            .mc2-track-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+            .mc2-track-name { flex: 1; font-size: 0.78rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: none; color: var(--text-color); outline: none; min-width: 0; }
+            .mc2-track-action { width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent; color: var(--text-color); opacity: 0.55; font-size: 0.72rem; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+            .mc2-track-action:hover { background: var(--context-menu-item-hover-bg); opacity: 1; }
+            .mc2-track-action.mc2-muted { color: #e5484d; opacity: 1; }
+            .mc2-add-track-btn { margin: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 8px; background: transparent; border: 1px dashed var(--border-color); color: var(--text-color); opacity: 0.7; font-size: 0.76rem; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+            .mc2-add-track-btn:hover { background: var(--input-bg); opacity: 1; }
+
+            /* サイドバー下部: 選択中トラックの音量 */
+            .mc2-track-vol-box { padding: 10px 12px 12px; border-top: 1px solid var(--border-color); flex-shrink: 0; display: none; }
+            .mc2-track-vol-box.mc2-visible { display: block; }
+            .mc2-track-vol-box-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.55; margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+            .mc2-track-vol-box input[type=range] { width: 100%; accent-color: var(--accent-color); }
+
+            .mc2-inst-popover { position: fixed; background: var(--context-menu-bg); border: 1px solid var(--context-menu-border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); width: 220px; max-height: 320px; overflow-y: auto; z-index: 200; padding: 6px; }
+            .mc2-inst-cat { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; color: var(--text-color); opacity: 0.5; padding: 6px 8px 2px; letter-spacing: 0.05em; }
+            .mc2-inst-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 8px; background: none; border: none; color: var(--text-color); font-size: 0.78rem; cursor: pointer; border-radius: 6px; }
+            .mc2-inst-item:hover { background: var(--context-menu-item-hover-bg); }
+            .mc2-inst-item i { width: 16px; text-align: center; opacity: 0.7; }
+
+            /* メインエリア: 設定バー + グリッド */
+            .mc2-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+            /* 設定バー: 曲全体の設定（テンポ・小節・キー・スケール・音域）を1段に集約 */
+            .mc2-settings-bar { display: flex; align-items: flex-end; gap: 0.9rem; padding: 8px 14px; border-bottom: 1px solid var(--border-color); background: var(--panel-bg); flex-wrap: wrap; flex-shrink: 0; }
+            .mc2-field { display: flex; flex-direction: column; gap: 3px; }
+            .mc2-field label { font-size: 0.6rem; color: var(--text-color); opacity: 0.55; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+            .mc2-field select, .mc2-field input[type=number] { background: var(--input-bg); color: var(--text-color); border: 1px solid var(--input-border); border-radius: 6px; padding: 5px 7px; font-size: 0.78rem; outline: none; height: 28px; box-sizing: border-box; }
+            .mc2-field select:focus, .mc2-field input:focus { border-color: var(--accent-color); }
+            .mc2-settings-spacer { flex: 1; }
 
             /* Grid */
-            .mc2-grid-wrap { flex: 1; overflow: auto; background: #101115; position: relative; padding: 16px 20px 24px; }
-            .mc2-grid { position: relative; display: inline-block; border-radius: 8px; overflow: hidden; }
+            .mc2-grid-wrap { flex: 1; overflow: auto; background: var(--window-bg); position: relative; padding: 16px 20px 24px; }
+            .mc2-grid { position: relative; display: inline-block; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
             .mc2-row { display: flex; }
-            .mc2-row-label { position: sticky; left: 0; z-index: 6; width: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.62rem; font-weight: 800; font-family: 'DM Mono', monospace; }
-            .mc2-cell { width: 28px; height: 24px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.04); cursor: pointer; flex-shrink: 0; transition: transform 0.05s ease, filter 0.1s; }
-            .mc2-cell:hover { filter: brightness(1.4); transform: scale(1.05); z-index: 2; position: relative; }
-            .mc2-cell.mc2-beat4 { border-left: 1px solid rgba(255,255,255,0.16); }
-            .mc2-cell.mc2-bar { border-left: 2px solid rgba(255,255,255,0.32); }
-            .mc2-cell.mc2-current-col { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.6); }
-            .mc2-row.mc2-root { background: rgba(255,255,255,0.03); }
-            .mc2-playhead { position: absolute; top: 0; width: 2px; background: #fff; opacity: 0.9; pointer-events: none; z-index: 9; box-shadow: 0 0 6px #fff; }
+            .mc2-row-label { position: sticky; left: 0; z-index: 6; width: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.62rem; font-weight: 700; font-family: 'DM Mono', monospace; background: var(--window-bg); }
+            .mc2-cell { width: 28px; height: 24px; box-sizing: border-box; border: 1px solid var(--border-color); cursor: pointer; flex-shrink: 0; transition: background 0.08s ease; }
+            .mc2-cell:hover { outline: 1px solid var(--accent-color); outline-offset: -1px; }
+            .mc2-cell.mc2-beat4 { border-left: 1px solid var(--border-color); }
+            .mc2-cell.mc2-bar { border-left: 2px solid var(--input-border); }
+            .mc2-cell.mc2-current-col { box-shadow: inset 0 0 0 2px var(--accent-color); }
+            .mc2-row.mc2-root { background: var(--input-bg); }
+            .mc2-playhead { position: absolute; top: 0; width: 2px; background: var(--accent-color); opacity: 0.9; pointer-events: none; z-index: 9; }
 
-            .mc2-empty { padding: 3rem; text-align: center; color: #5b6270; font-size: 0.85rem; }
+            .mc2-empty { padding: 3rem; text-align: center; color: var(--text-color); opacity: 0.5; font-size: 0.85rem; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+            .mc2-empty i { font-size: 1.6rem; opacity: 0.6; }
 
-            /* Bottom bar */
-            .mc2-bottombar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid rgba(255,255,255,0.08); background: #1a1c21; font-size: 0.75rem; color: #a8b0bd; }
-            .mc2-vol-row { display: flex; align-items: center; gap: 6px; }
-            .mc2-vol-row input[type=range] { width: 90px; accent-color: #7c5cff; }
+            /* Bottom bar: 操作ヒントのみ */
+            .mc2-bottombar { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--border-color); background: var(--panel-bg); font-size: 0.74rem; color: var(--text-color); opacity: 0.6; flex-shrink: 0; }
+            .mc2-bottombar i { opacity: 0.8; }
             `;
                             document.head.appendChild(styleEl);
                         }
 
                         // ── Instrument Presets (simple, fun, quick to load) ──
                         const MC2_INSTRUMENTS = {
-                            marimba: { label: 'マリンバ', icon: 'fa-cubes', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sine' }, envelope: { attack: 0.001, decay: 0.5, sustain: 0.0, release: 0.3 } }) },
+                            marimba: { label: 'マリンバ', icon: 'fa-square', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sine' }, envelope: { attack: 0.001, decay: 0.5, sustain: 0.0, release: 0.3 } }) },
                             piano: { label: 'ピアノ', icon: 'fa-music', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsawtooth', count: 3, spread: 20 }, envelope: { attack: 0.002, decay: 1.0, sustain: 0.05, release: 0.5 } }) },
                             synthLead: { label: 'シンセリード', icon: 'fa-bolt', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.01, decay: 0.15, sustain: 0.4, release: 0.3 } }) },
                             bell: { label: 'ベル', icon: 'fa-bell', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.FMSynth, { harmonicity: 8, modulationIndex: 10, envelope: { attack: 0.001, decay: 1.2, sustain: 0.0, release: 0.8 } }) },
-                            pluck: { label: 'プラック', icon: 'fa-guitar', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.35, sustain: 0.0, release: 0.15 } }) },
+                            pluck: { label: 'プラック', icon: 'fa-hand-point-up', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.35, sustain: 0.0, release: 0.15 } }) },
                             pad: { label: 'パッド', icon: 'fa-cloud', cat: 'メロディ', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsine', count: 3, spread: 25 }, envelope: { attack: 0.5, decay: 0.3, sustain: 0.8, release: 1.2 } }) },
-                            bass: { label: 'ベース', icon: 'fa-water', cat: 'ベース', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fmsquare', modulationType: 'sine' }, envelope: { attack: 0.008, decay: 0.25, sustain: 0.5, release: 0.25 } }) },
+                            bass: { label: 'ベース', icon: 'fa-waveform', cat: 'ベース', build: () => new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fmsquare', modulationType: 'sine' }, envelope: { attack: 0.008, decay: 0.25, sustain: 0.5, release: 0.25 } }) },
                             kick: { label: 'キック', icon: 'fa-circle', cat: 'リズム', drum: true, build: () => new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.3 } }) },
-                            snare: { label: 'スネア', icon: 'fa-drum', cat: 'リズム', drum: true, build: () => new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.2, sustain: 0 } }) },
-                            hihat: { label: 'ハイハット', icon: 'fa-record-vinyl', cat: 'リズム', drum: true, build: () => new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.06, release: 0.02 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.2 }) },
+                            snare: { label: 'スネア', icon: 'fa-square', cat: 'リズム', drum: true, build: () => new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.2, sustain: 0 } }) },
+                            hihat: { label: 'ハイハット', icon: 'fa-circle-dot', cat: 'リズム', drum: true, build: () => new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.06, release: 0.02 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.2 }) },
                         };
                         const MC2_DRUM_NOTE = { kick: 'C2', snare: 'C2', hihat: 'C6' };
                         const MC2_TRACK_COLORS = ['#7c5cff', '#ff6b9d', '#ffb454', '#4fd1c5', '#4f7dff', '#8bd450', '#ff7a5c', '#c084fc'];
@@ -60319,56 +60340,66 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         // ── Window Content ──
                         const content = `
             <div class="mc2-app" id="mc2-app-${windowId}">
-                <div class="mc2-toolbar">
+                <div class="mc2-header">
                     <input type="text" id="mc2-title" value="無題の曲">
                     <div class="mc2-sep"></div>
-                    <button class="mc2-btn mc2-primary" id="mc2-play"><i class="fas fa-play"></i> 再生</button>
-                    <button class="mc2-btn mc2-icon-btn" id="mc2-stop" title="停止"><i class="fas fa-stop"></i></button>
+                    <button class="mc2-btn" id="mc2-save" title="保存"><i class="far fa-floppy-disk"></i></button>
+                    <button class="mc2-btn" id="mc2-open" title="開く"><i class="far fa-folder-open"></i></button>
+                    <button class="mc2-btn" id="mc2-export" title="WAVで書き出し"><i class="far fa-file-audio"></i></button>
+                    <div class="mc2-sep"></div>
+                    <button class="mc2-btn mc2-primary" id="mc2-play"><i class="far fa-play"></i> 再生</button>
+                    <button class="mc2-btn mc2-icon-btn" id="mc2-stop" title="停止"><i class="far fa-stop"></i></button>
                     <div class="mc2-time" id="mc2-time">1 / ${project.bars}</div>
-                    <div class="mc2-sep"></div>
-                    <div class="mc2-field"><label>テンポ</label><input type="number" id="mc2-bpm" value="${project.bpm}" min="40" max="240" style="width:58px;"></div>
-                    <div class="mc2-field"><label>小節</label>
-                        <select id="mc2-bars">
-                            <option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
-                        </select>
-                    </div>
-                    <div class="mc2-field"><label>キー</label>
-                        <select id="mc2-root">
-                            ${NOTE_NAMES.map(n => `<option value="${n}" ${n === project.root ? 'selected' : ''}>${n}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="mc2-field"><label>スケール</label>
-                        <select id="mc2-scale">
-                            ${Object.entries(SCALES).map(([k, v]) => `<option value="${k}" ${k === project.scaleKey ? 'selected' : ''}>${v.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="mc2-field"><label>音域</label>
-                        <select id="mc2-octaves">
-                            <option value="1">1 oct</option><option value="2" selected>2 oct</option><option value="3">3 oct</option>
-                        </select>
-                    </div>
                     <div class="mc2-spacer"></div>
-                    <button class="mc2-btn" id="mc2-randomize" title="おまかせで作曲"><i class="fas fa-dice"></i> おまかせ</button>
-                    <button class="mc2-btn" id="mc2-clear" title="現在のトラックを消去"><i class="fas fa-eraser"></i> クリア</button>
-                    <div class="mc2-sep"></div>
-                    <button class="mc2-btn" id="mc2-save" title="保存"><i class="fas fa-floppy-disk"></i> 保存</button>
-                    <button class="mc2-btn" id="mc2-open" title="開く"><i class="fas fa-folder-open"></i></button>
-                    <button class="mc2-btn" id="mc2-export" title="WAVで書き出し"><i class="fas fa-file-export"></i> 書き出し</button>
+                    <button class="mc2-btn" id="mc2-randomize" title="おまかせで作曲"><i class="far fa-shuffle"></i> おまかせ</button>
+                    <button class="mc2-btn" id="mc2-clear" title="現在のトラックを消去"><i class="far fa-eraser"></i> クリア</button>
                 </div>
 
-                <div class="mc2-tracks-bar" id="mc2-tracks-bar"></div>
+                <div class="mc2-body">
+                    <div class="mc2-sidebar">
+                        <div class="mc2-sidebar-head">トラック</div>
+                        <div class="mc2-track-list" id="mc2-track-list"></div>
+                        <div class="mc2-add-track-btn" id="mc2-add-track"><i class="far fa-plus"></i> トラックを追加</div>
+                        <div class="mc2-track-vol-box" id="mc2-track-vol-box">
+                            <div class="mc2-track-vol-box-label"><i class="far fa-volume"></i> <span id="mc2-track-vol-label">音量</span></div>
+                            <input type="range" id="mc2-track-vol" min="-30" max="6" value="0">
+                        </div>
+                    </div>
 
-                <div class="mc2-grid-wrap" id="mc2-grid-wrap">
-                    <div class="mc2-playhead" id="mc2-playhead"></div>
-                    <div class="mc2-grid" id="mc2-grid"></div>
-                </div>
+                    <div class="mc2-main">
+                        <div class="mc2-settings-bar">
+                            <div class="mc2-field"><label>テンポ</label><input type="number" id="mc2-bpm" value="${project.bpm}" min="40" max="240" style="width:58px;"></div>
+                            <div class="mc2-field"><label>小節</label>
+                                <select id="mc2-bars">
+                                    <option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
+                                </select>
+                            </div>
+                            <div class="mc2-field"><label>キー</label>
+                                <select id="mc2-root">
+                                    ${NOTE_NAMES.map(n => `<option value="${n}" ${n === project.root ? 'selected' : ''}>${n}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="mc2-field"><label>スケール</label>
+                                <select id="mc2-scale">
+                                    ${Object.entries(SCALES).map(([k, v]) => `<option value="${k}" ${k === project.scaleKey ? 'selected' : ''}>${v.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="mc2-field"><label>音域</label>
+                                <select id="mc2-octaves">
+                                    <option value="1">1 oct</option><option value="2" selected>2 oct</option><option value="3">3 oct</option>
+                                </select>
+                            </div>
+                            <div class="mc2-settings-spacer"></div>
+                        </div>
 
-                <div class="mc2-bottombar">
-                    <span><i class="fas fa-circle-info"></i> セルをクリックして音符を置く / もう一度クリックで消す</span>
-                    <div class="mc2-spacer"></div>
-                    <div class="mc2-vol-row" id="mc2-track-vol-row" style="display:none;">
-                        <span id="mc2-track-vol-label">音量</span>
-                        <input type="range" id="mc2-track-vol" min="-30" max="6" value="0">
+                        <div class="mc2-grid-wrap" id="mc2-grid-wrap">
+                            <div class="mc2-playhead" id="mc2-playhead"></div>
+                            <div class="mc2-grid" id="mc2-grid"></div>
+                        </div>
+
+                        <div class="mc2-bottombar">
+                            <i class="far fa-circle-info"></i> セルをクリックして音符を置く / もう一度クリックで消す
+                        </div>
                     </div>
                 </div>
             </div>
@@ -60391,65 +60422,59 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         const saveBtn = appRoot.querySelector('#mc2-save');
                         const openBtn = appRoot.querySelector('#mc2-open');
                         const exportBtn = appRoot.querySelector('#mc2-export');
-                        const tracksBar = appRoot.querySelector('#mc2-tracks-bar');
+                        const trackList = appRoot.querySelector('#mc2-track-list');
+                        const addTrackBtn = appRoot.querySelector('#mc2-add-track');
                         const gridWrap = appRoot.querySelector('#mc2-grid-wrap');
                         const gridEl = appRoot.querySelector('#mc2-grid');
                         const playheadEl = appRoot.querySelector('#mc2-playhead');
-                        const trackVolRow = appRoot.querySelector('#mc2-track-vol-row');
+                        const trackVolBox = appRoot.querySelector('#mc2-track-vol-box');
                         const trackVolLabel = appRoot.querySelector('#mc2-track-vol-label');
                         const trackVolInput = appRoot.querySelector('#mc2-track-vol');
 
                         const CELL_W = 29, CELL_H = 25, ROW_LABEL_W = 44;
 
                         // ── Rendering ──
-                        function renderTracksBar() {
-                            tracksBar.innerHTML = '';
+                        function renderTrackList() {
+                            trackList.innerHTML = '';
                             project.tracks.forEach(track => {
-                                const chip = document.createElement('div');
-                                chip.className = 'mc2-track-chip' + (track.id === activeTrackId ? ' mc2-active' : '');
-                                chip.style.border = track.id === activeTrackId ? `2px solid ${track.color}` : '2px solid transparent';
-                                chip.innerHTML = `
-                                    <span class="mc2-track-chip-dot" style="background:${track.color};"></span>
-                                    <input class="mc2-track-chip-name" value="${escapeHtmlMc2(track.name)}" />
-                                    <button class="mc2-track-chip-btn${track.muted ? ' mc2-muted' : ''}" data-action="mute" title="ミュート"><i class="fas fa-volume-${track.muted ? 'xmark' : 'high'}"></i></button>
-                                    <button class="mc2-track-chip-btn" data-action="del" title="削除"><i class="fas fa-trash"></i></button>
+                                const row = document.createElement('div');
+                                row.className = 'mc2-track-row' + (track.id === activeTrackId ? ' mc2-active' : '');
+                                row.innerHTML = `
+                                    <span class="mc2-track-dot" style="background:${track.color};"></span>
+                                    <input class="mc2-track-name" value="${escapeHtmlMc2(track.name)}" />
+                                    <button class="mc2-track-action${track.muted ? ' mc2-muted' : ''}" data-action="mute" title="ミュート"><i class="far fa-volume-${track.muted ? 'slash' : 'high'}"></i></button>
+                                    <button class="mc2-track-action" data-action="del" title="削除"><i class="far fa-trash"></i></button>
                                 `;
-                                chip.addEventListener('click', (e) => {
+                                row.addEventListener('click', (e) => {
                                     if (e.target.closest('[data-action]') || e.target.tagName === 'INPUT') return;
                                     activeTrackId = track.id;
-                                    renderTracksBar(); renderGrid();
+                                    renderTrackList(); renderGrid();
                                 });
-                                chip.querySelector('.mc2-track-chip-name').addEventListener('change', (e) => {
+                                row.querySelector('.mc2-track-name').addEventListener('change', (e) => {
                                     track.name = e.target.value.trim() || track.name;
                                 });
-                                chip.querySelector('[data-action="mute"]').addEventListener('click', () => {
+                                row.querySelector('[data-action="mute"]').addEventListener('click', () => {
                                     track.muted = !track.muted;
                                     track.vol.mute = track.muted;
-                                    renderTracksBar();
+                                    renderTrackList();
                                 });
-                                chip.querySelector('[data-action="del"]').addEventListener('click', () => {
+                                row.querySelector('[data-action="del"]').addEventListener('click', () => {
                                     if (project.tracks.length <= 1) { createNotification('Music Creator', '最後のトラックは削除できません。', 'warning'); return; }
                                     disposeTrack(track);
                                     project.tracks = project.tracks.filter(t => t.id !== track.id);
                                     if (activeTrackId === track.id) activeTrackId = project.tracks[0].id;
-                                    renderTracksBar(); renderGrid();
+                                    renderTrackList(); renderGrid();
                                 });
-                                tracksBar.appendChild(chip);
+                                trackList.appendChild(row);
                             });
-
-                            const addBtn = document.createElement('div');
-                            addBtn.className = 'mc2-add-track-btn';
-                            addBtn.innerHTML = `<i class="fas fa-plus"></i> トラック追加`;
-                            addBtn.addEventListener('click', (e) => openInstrumentPicker(e.currentTarget));
-                            tracksBar.appendChild(addBtn);
 
                             const activeTrack = getActiveTrack();
                             if (activeTrack) {
-                                trackVolRow.style.display = 'flex';
-                                trackVolLabel.textContent = `${activeTrack.name} 音量`;
+                                trackVolBox.classList.add('mc2-visible');
+                                trackVolLabel.textContent = `${activeTrack.name}`;
                                 trackVolInput.value = activeTrack.volume;
                             } else {
-                                trackVolRow.style.display = 'none';
+                                trackVolBox.classList.remove('mc2-visible');
                             }
                         }
 
@@ -60472,7 +60497,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             Object.entries(cats).forEach(([cat, items]) => {
                                 html += `<div class="mc2-inst-cat">${cat}</div>`;
                                 items.forEach(([key, def]) => {
-                                    html += `<button class="mc2-inst-item" data-key="${key}"><i class="fas ${def.icon}"></i> ${def.label}</button>`;
+                                    html += `<button class="mc2-inst-item" data-key="${key}"><i class="far ${def.icon}"></i> ${def.label}</button>`;
                                 });
                             });
                             pop.innerHTML = html;
@@ -60483,7 +60508,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     await ensureAudioContext();
                                     createTrack(btn.dataset.key);
                                     closeInstrumentPicker();
-                                    renderTracksBar(); renderGrid(); pushHistoryMc2();
+                                    renderTrackList(); renderGrid(); pushHistoryMc2();
                                 });
                             });
                             setTimeout(() => {
@@ -60497,7 +60522,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             buildScalePitches();
                             const track = getActiveTrack();
                             if (!track) {
-                                gridEl.innerHTML = '<div class="mc2-empty">トラックを追加して作曲を始めましょう</div>';
+                                gridEl.innerHTML = '<div class="mc2-empty"><i class="far fa-music"></i>トラックを追加して作曲を始めましょう</div>';
                                 return;
                             }
                             const steps = totalSteps();
@@ -60508,13 +60533,13 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             rows.forEach(pitch => {
                                 const isRoot = !isDrum && pitch.replace(/\d+$/, '') === project.root;
                                 html += `<div class="mc2-row${isRoot ? ' mc2-root' : ''}">`;
-                                html += `<div class="mc2-row-label" style="color:${isRoot ? track.color : '#7c8494'};background:${isRoot ? 'rgba(255,255,255,0.05)' : 'transparent'};">${isDrum ? '●' : pitch}</div>`;
+                                html += `<div class="mc2-row-label" style="color:${isRoot ? track.color : 'var(--text-color)'};opacity:${isRoot ? '1' : '0.55'};background:${isRoot ? 'var(--input-bg)' : 'transparent'};">${isDrum ? '●' : pitch}</div>`;
                                 for (let s = 0; s < steps; s++) {
                                     const cls = ['mc2-cell'];
                                     if (s % (BEATS_PER_BAR * STEPS_PER_BEAT) === 0 && s !== 0) cls.push('mc2-bar');
                                     else if (s % STEPS_PER_BEAT === 0 && s !== 0) cls.push('mc2-beat4');
                                     const on = track.cells.has(cellKey(s, pitch));
-                                    html += `<div class="${cls.join(' ')}" data-step="${s}" data-pitch="${pitch}" style="background:${on ? track.color : '#1b1d23'};"></div>`;
+                                    html += `<div class="${cls.join(' ')}" data-step="${s}" data-pitch="${pitch}" style="background:${on ? track.color : 'var(--input-bg)'};"></div>`;
                                 }
                                 html += `</div>`;
                             });
@@ -60529,7 +60554,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     const key = cellKey(step, pitch);
                                     if (track.cells.has(key)) {
                                         track.cells.delete(key);
-                                        cell.style.background = '#1b1d23';
+                                        cell.style.background = 'var(--input-bg)';
                                     } else {
                                         track.cells.add(key);
                                         cell.style.background = track.color;
@@ -60599,14 +60624,14 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             Tone.Transport.start();
                             isPlaying = true;
                             playBtn.classList.add('mc2-playing');
-                            playBtn.innerHTML = '<i class="fas fa-pause"></i> 一時停止';
+                            playBtn.innerHTML = '<i class="far fa-pause"></i> 一時停止';
                             playheadRafId = requestAnimationFrame(playheadLoop);
                         }
                         function pausePlayback() {
                             Tone.Transport.pause();
                             isPlaying = false;
                             playBtn.classList.remove('mc2-playing');
-                            playBtn.innerHTML = '<i class="fas fa-play"></i> 再生';
+                            playBtn.innerHTML = '<i class="far fa-play"></i> 再生';
                             if (playheadRafId) cancelAnimationFrame(playheadRafId);
                         }
                         function stopPlaybackMc2() {
@@ -60614,7 +60639,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             Tone.Transport.seconds = 0;
                             isPlaying = false;
                             playBtn.classList.remove('mc2-playing');
-                            playBtn.innerHTML = '<i class="fas fa-play"></i> 再生';
+                            playBtn.innerHTML = '<i class="far fa-play"></i> 再生';
                             if (playheadRafId) cancelAnimationFrame(playheadRafId);
                             updatePlayheadPx(0);
                             timeEl.textContent = `1 / ${project.bars}`;
@@ -60734,7 +60759,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             });
                             if (!project.tracks.length) createTrack('marimba');
                             activeTrackId = project.tracks[0].id;
-                            renderTracksBar(); renderGrid();
+                            renderTrackList(); renderGrid();
                             mc2History = []; mc2HistoryIndex = -1; pushHistoryMc2();
                         }
 
@@ -60802,6 +60827,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         scaleSelect.addEventListener('change', () => { project.scaleKey = scaleSelect.value; renderGrid(); pushHistoryMc2(); });
                         octavesSelect.addEventListener('change', () => { project.octaves = Number(octavesSelect.value); renderGrid(); pushHistoryMc2(); });
                         randomizeBtn.addEventListener('click', randomizeMelody);
+                        addTrackBtn.addEventListener('click', (e) => openInstrumentPicker(e.currentTarget));
                         clearBtn.addEventListener('click', () => { const t = getActiveTrack(); if (t) { t.cells.clear(); renderGrid(); pushHistoryMc2(); } });
                         saveBtn.addEventListener('click', saveProjectMc2);
                         openBtn.addEventListener('click', openProjectMc2);
@@ -60818,7 +60844,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         // ── Init ──
                         function init() {
                             createTrack('marimba');
-                            renderTracksBar();
+                            renderTrackList();
                             renderGrid();
                             mc2History = []; mc2HistoryIndex = -1; pushHistoryMc2();
                         }
@@ -69342,6 +69368,32 @@ RiviftConnect.connectToServer = function () {
             // 1. リリースアセット(index.html)をダウンロード
             // 2a. ローカル版: File System Access APIでファイル上書き
             // 2b. サーバー版: キャッシュ破棄＋reload
+            // ダウンロードURL候補を順番に試す。
+            // GitHub Releasesのアセット(github.com/.../releases/download/...)は
+            // ブラウザからのfetchだとCORSヘッダーが無く失敗するため、
+            // 同じファイルを指す別ルート(jsDelivr等)があれば併せて試す。
+            // manifest.jsonのdownloadUrlに複数候補を配列で渡すか、
+            // 単一URLでも自動でjsDelivr形式への変換を試みる。
+            function _riviftBuildDownloadCandidates(releaseInfo) {
+                const urls = [];
+                const primary = releaseInfo?.downloadUrl;
+                if (Array.isArray(primary)) {
+                    urls.push(...primary.filter(Boolean));
+                } else if (primary) {
+                    urls.push(primary);
+                    // github.com/OWNER/REPO/releases/download/TAG/FILE 形式なら
+                    // jsDelivrのGitHub連携形式に変換した候補も追加する。
+                    // (publicリポジトリでのみ機能。privateだと404になるが、
+                    //  その場合は元のURLの結果がそのままエラーとして返る)
+                    const m = primary.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/);
+                    if (m) {
+                        const [, owner, repo, tag, file] = m;
+                        urls.push(`https://cdn.jsdelivr.net/gh/${owner}/${repo}@${tag}/${file}`);
+                    }
+                }
+                return urls;
+            }
+
             async function riviftPerformUpdate(releaseInfo) {
                 riviftCancelScheduledUpdate();
                 window._systemGuard?.destroy?.();
@@ -69357,9 +69409,22 @@ RiviftConnect.connectToServer = function () {
 
                     overlay.setText('最新版をダウンロード中...');
                     overlay.setProgress(20);
-                    const res = await fetch(releaseInfo.downloadUrl);
-                    if (!res.ok) throw new Error(`ダウンロード失敗: ${res.status}`);
-                    const newContent = await res.text();
+                    const candidates = _riviftBuildDownloadCandidates(releaseInfo);
+                    let newContent = null;
+                    let lastError = null;
+                    for (const url of candidates) {
+                        try {
+                            const res = await fetch(url);
+                            if (!res.ok) { lastError = new Error(`ダウンロード失敗: ${res.status} (${url})`); continue; }
+                            newContent = await res.text();
+                            break;
+                        } catch (e) {
+                            lastError = e;
+                        }
+                    }
+                    if (newContent === null) {
+                        throw lastError || new Error('すべての配信元からのダウンロードに失敗しました');
+                    }
                     overlay.setProgress(60);
 
                     if (_riviftIsLocalFileMode()) {
