@@ -8,93 +8,259 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://esm.run https://esm.sh https://cdn.jsdelivr.net https://cdn.socket.io; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; media-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; font-src * data: blob:; worker-src * blob: data:; object-src 'none'; frame-ancestors 'self';">
+        content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://esm.run https://esm.sh https://cdn.jsdelivr.net https://cdn.socket.io; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; media-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; font-src * data: blob:; worker-src * blob: data:; object-src 'none';">
         <title>Rivift OS</title>
     <script id="rivift-system-bootloader">
-    // ── Rivift OS インライン・ブートローダー (v3 - クリーンブート・安全設計) ──
-    // 従来の document.write() による再描画は CustomElementRegistry の重複登録例外や
-    // グローバル変数の二重宣言例外を引き起こすため完全廃止。
-    // Service Worker / CacheStorage および独立コンテキスト遷移による安全なブートを実現。
+    // ── Rivift OS インライン・ブートローダー (v4 - 同一URL・同一オリジン安全ブート設計) ──
+    // blob: URL への遷移はオリジンが null (不透明オリジン) となり、ブラウザのセキュリティ制限により
+    // localStorage / sessionStorage / IndexedDB が SecurityError で遮断され URL 欄も blob:null/... に
+    // 汚染されるため一切行わない。
+    // 代わりに CustomElementRegistry 重複保護・トップレベル宣言の var 正規化・初期スクリプト実行抑止を
+    // 行った上で、本来の URL とオリジンを維持したまま document.write でクリーンブートする。
     (function() {
+        // 1. Tailwind CDN の本番環境警告ノイズを抑制
+        try {
+            var _origWarn = console.warn;
+            if (typeof _origWarn === "function" && !_origWarn.__riviftFiltered) {
+                var _filteredWarn = function() {
+                    var msg = arguments[0] ? String(arguments[0]) : "";
+                    if (msg.indexOf("cdn.tailwindcss.com should not be used in production") !== -1) return;
+                    return _origWarn.apply(console, arguments);
+                };
+                _filteredWarn.__riviftFiltered = true;
+                console.warn = _filteredWarn;
+            }
+        } catch (_) {}
+
+        // 2. 制限付きコンテキストでも Uncaught SecurityError でクラッシュしないよう Storage フォールバックを保証
+        function createMemoryStorage() {
+            var store = Object.create(null);
+            return {
+                getItem: function(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+                setItem: function(k, v) { store[k] = String(v); },
+                removeItem: function(k) { delete store[k]; },
+                clear: function() { store = Object.create(null); },
+                key: function(i) { var keys = Object.keys(store); return keys[i] !== undefined ? keys[i] : null; },
+                get length() { return Object.keys(store).length; }
+            };
+        }
+        try {
+            var _ls = window.localStorage;
+            _ls.getItem("__rivift_probe__");
+        } catch (e) {
+            try {
+                Object.defineProperty(window, "localStorage", { value: createMemoryStorage(), configurable: true, writable: true });
+            } catch (_) {}
+        }
+        try {
+            var _ss = window.sessionStorage;
+            _ss.getItem("__rivift_probe__");
+        } catch (e) {
+            try {
+                Object.defineProperty(window, "sessionStorage", { value: createMemoryStorage(), configurable: true, writable: true });
+            } catch (_) {}
+        }
+
+        // 3. CustomElementRegistry の重複登録例外 (md-switch 等) を防止
+        try {
+            if (window.customElements && !window.customElements.__riviftGuarded) {
+                var _origDefine = window.customElements.define.bind(window.customElements);
+                window.customElements.define = function(name, ctor, opts) {
+                    if (window.customElements.get(name)) return;
+                    return _origDefine(name, ctor, opts);
+                };
+                window.customElements.__riviftGuarded = true;
+            }
+        } catch (_) {}
+
+        // 4. アップデートHTMLの正規化ヘルパー（ブート時・保存時の双方で使用）
+        function prepareUpdatedHtml(rawHtml, version) {
+            var html = String(rawHtml || "");
+            var cleanVer = String(version || "").replace(/^v/i, "").trim();
+            // <meta> で無効な frame-ancestors ディレクティブを除去
+            html = html.replace(/(<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*content=["'][^"']*?)frame-ancestors\s+[^;"']+;?\s*/gi, "$1");
+            // 内部ブートローダーの二重起動を防止
+            html = html.replace(/<script\s+id=["']rivift-system-bootloader["']>[\s\S]*?<\/script>/i, "<script id=\"rivift-system-bootloader\">window.__RIVIFT_BOOTED_FROM_STORAGE__=true;<\/script>");
+            // 同一 window 内での再宣言エラー (SyntaxError) を防ぐためトップレベル const/let/class を var 化
+            html = html.replace(/^(\s*)(?:const|let)\s+(openApps|activeWindow|ProcessManager|systemLanguage|RIVIFT_OS_VERSION|RIVIFT_UPDATE_CONFIG|RIVIFT_I18N|ProximityShare|NearbyShare)\b/gm, "$1var $2");
+            html = html.replace(/^(\s*)class\s+(DesktopManager)\b/gm, "$1var $2 = class $2");
+            // リリースバージョンとコード内定数のズレを自動補正
+            if (cleanVer) {
+                html = html.replace(/(var|const|let)\s+RIVIFT_OS_VERSION\s*=\s*["'][^"']+["']/g, "$1 RIVIFT_OS_VERSION = '" + cleanVer + "'");
+                html = html.replace(/(var|const|let)\s+CURRENT_FILE_VERSION\s*=\s*["'][^"']+["']/g, "$1 CURRENT_FILE_VERSION = '" + cleanVer + "'");
+            }
+            // 旧バージョンのアップデート処理に含まれる blobUrl 遷移を通常の reload に置換
+            html = html.replace(/window\.location\.replace\(blobUrl\)\s*;/g, "window.location.reload();");
+            return html;
+        }
+        window.__riviftPrepareUpdatedHtml = prepareUpdatedHtml;
+
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
-        if (window.location.protocol === "blob:") return;
+
+        var CURRENT_FILE_VERSION = "5.2.7";
+        function compareVer(a, b) {
+            var clean = function(v) { return String(v || "").replace(/^v/i, "").trim(); };
+            var pa = clean(a).split(".").map(function(n) { return parseInt(n, 10) || 0; });
+            var pb = clean(b).split(".").map(function(n) { return parseInt(n, 10) || 0; });
+            for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+                var na = pa[i] || 0, nb = pb[i] || 0;
+                if (na > nb) return 1;
+                if (na < nb) return -1;
+            }
+            return 0;
+        }
+
+        // localStorage に更新バージョン記録がある場合は同期的に初期スクリプトの実行を抑止
+        try {
+            var recordedVer = localStorage.getItem("riviftUpdatedVersion");
+            if (recordedVer && compareVer(recordedVer, CURRENT_FILE_VERSION) > 0) {
+                window.__RIVIFT_BOOTING_UPDATE__ = true;
+            }
+        } catch (_) {}
 
         try {
-            const CURRENT_FILE_VERSION = "5.2.7";
-            const req = indexedDB.open("rivift-system-store", 1);
+            if (typeof indexedDB === "undefined" || !indexedDB) {
+                window.__RIVIFT_BOOTING_UPDATE__ = false;
+                return;
+            }
+            var req = indexedDB.open("rivift-system-store", 1);
             req.onupgradeneeded = function(e) {
-                const db = e.target.result;
+                var db = e.target.result;
                 if (!db.objectStoreNames.contains("system")) db.createObjectStore("system");
             };
+            req.onerror = function() {
+                if (window.__RIVIFT_BOOTING_UPDATE__) {
+                    window.__RIVIFT_BOOTING_UPDATE__ = false;
+                    try { localStorage.removeItem("riviftUpdatedVersion"); } catch (_) {}
+                    window.location.reload();
+                }
+            };
             req.onsuccess = function(e) {
-                const db = e.target.result;
-                const tx = db.transaction("system", "readwrite");
-                const store = tx.objectStore("system");
-                const getReq = store.get("updated-os");
+                var db = e.target.result;
+                var tx = db.transaction("system", "readwrite");
+                var store = tx.objectStore("system");
+                var getReq = store.get("updated-os");
+                getReq.onerror = function() {
+                    if (window.__RIVIFT_BOOTING_UPDATE__) {
+                        window.__RIVIFT_BOOTING_UPDATE__ = false;
+                        try { localStorage.removeItem("riviftUpdatedVersion"); } catch (_) {}
+                        window.location.reload();
+                    }
+                };
                 getReq.onsuccess = function() {
-                    const item = getReq.result;
+                    var item = getReq.result;
                     if (item && item.html && item.version) {
-                        const clean = function(v) { return String(v || "").replace(/^v/i, "").trim(); };
-                        const pa = clean(item.version).split(".").map(function(n) { return parseInt(n, 10) || 0; });
-                        const pb = clean(CURRENT_FILE_VERSION).split(".").map(function(n) { return parseInt(n, 10) || 0; });
-                        let isNewer = false;
-                        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-                            const na = pa[i] || 0, nb = pb[i] || 0;
-                            if (na > nb) { isNewer = true; break; }
-                            if (na < nb) { isNewer = false; break; }
-                        }
+                        var isNewer = compareVer(item.version, CURRENT_FILE_VERSION) > 0;
 
                         // 保存されたOSが現在のファイルバージョンと同等または古い場合は自動クリーンアップ
                         if (!isNewer) {
                             try {
-                                const delTx = db.transaction("system", "readwrite");
+                                var delTx = db.transaction("system", "readwrite");
                                 delTx.objectStore("system").delete("updated-os");
+                                localStorage.removeItem("riviftUpdatedVersion");
                                 console.log("[Rivift Bootloader] 現行ファイルが最新(ver." + CURRENT_FILE_VERSION + ")のため、旧アップデート領域を解放しました");
                             } catch (_) {}
+                            if (window.__RIVIFT_BOOTING_UPDATE__) {
+                                window.__RIVIFT_BOOTING_UPDATE__ = false;
+                                window.location.reload();
+                            }
                             return;
                         }
 
-                        // 新しいバージョンが保存されている場合
+                        // 新しいバージョンが保存されている場合: 同一URL・同一オリジンのままインプレースでクリーンブート
                         if (isNewer && item.html.length > 500000 && !window.__RIVIFT_BOOTED_FROM_STORAGE__) {
-                            // 連続クラッシュ対策（セーフモード）
-                            const attempts = parseInt(sessionStorage.getItem("__rivift_boot_attempts__") || "0", 10);
+                            var attempts = 0;
+                            try { attempts = parseInt(sessionStorage.getItem("__rivift_boot_attempts__") || "0", 10); } catch (_) {}
                             if (attempts >= 2) {
                                 console.warn("[Rivift Bootloader] アップデート版の起動に問題が発生したため、セーフモードで内蔵OSを起動します");
-                                sessionStorage.removeItem("__rivift_boot_attempts__");
+                                try { sessionStorage.removeItem("__rivift_boot_attempts__"); } catch (_) {}
+                                try { localStorage.removeItem("riviftUpdatedVersion"); } catch (_) {}
                                 try {
-                                    const safeTx = db.transaction("system", "readwrite");
+                                    var safeTx = db.transaction("system", "readwrite");
                                     safeTx.objectStore("system").delete("updated-os");
                                 } catch (_) {}
+                                if (window.__RIVIFT_BOOTING_UPDATE__) {
+                                    window.__RIVIFT_BOOTING_UPDATE__ = false;
+                                    window.location.reload();
+                                }
                                 return;
                             }
-                            sessionStorage.setItem("__rivift_boot_attempts__", String(attempts + 1));
+                            try { sessionStorage.setItem("__rivift_boot_attempts__", String(attempts + 1)); } catch (_) {}
 
                             window.__RIVIFT_BOOTED_FROM_STORAGE__ = true;
-                            console.log("[Rivift Bootloader] 最新のOS (ver." + item.version + ") をクリーンブートします");
+                            window.__RIVIFT_BOOTING_UPDATE__ = false;
+                            var targetHtml = prepareUpdatedHtml(item.html, item.version);
+                            console.log("[Rivift Bootloader] 最新のOS (ver." + item.version + ") を同一URLでクリーンブートします");
 
                             // CacheStorage も同期
                             if ("caches" in window) {
                                 caches.open("rivift-runtime-cache").then(function(c) {
-                                    c.put("/", new Response(item.html, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
-                                    c.put("/index.html", new Response(item.html, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+                                    c.put("/", new Response(targetHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
+                                    c.put("/index.html", new Response(targetHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } }));
                                 }).catch(function() {});
                             }
 
-                            // 相対パス解決のため <base> タグを付与してBlob URLへ安全に遷移
-                            let targetHtml = item.html;
-                            const baseHref = window.location.origin + window.location.pathname.replace(/[^/]*$/, "");
-                            if (!targetHtml.includes("<base ")) {
-                                targetHtml = targetHtml.replace(/<head(\s[^>]*)?>/i, "$&<base href=\"" + baseHref + "\">");
-                            }
+                            // document.write 後の DOMContentLoaded / window.load を確実に1回ずつ発火させるラッパー
+                            var dclQueue = [];
+                            var loadQueue = [];
+                            var origDocAdd = document.addEventListener.bind(document);
+                            var origWinAdd = window.addEventListener.bind(window);
+                            document.addEventListener = function(type, listener, options) {
+                                if (type === "DOMContentLoaded" && typeof listener === "function") {
+                                    var ran = false;
+                                    var wrapped = function(ev) {
+                                        if (ran) return;
+                                        ran = true;
+                                        return listener.call(document, ev || new Event("DOMContentLoaded"));
+                                    };
+                                    dclQueue.push(wrapped);
+                                    return origDocAdd(type, wrapped, options);
+                                }
+                                return origDocAdd(type, listener, options);
+                            };
+                            window.addEventListener = function(type, listener, options) {
+                                if (type === "load" && typeof listener === "function") {
+                                    var ran = false;
+                                    var wrapped = function(ev) {
+                                        if (ran) return;
+                                        ran = true;
+                                        return listener.call(window, ev || new Event("load"));
+                                    };
+                                    loadQueue.push(wrapped);
+                                    return origWinAdd(type, wrapped, options);
+                                }
+                                return origWinAdd(type, listener, options);
+                            };
 
-                            const blob = new Blob([targetHtml], { type: "text/html; charset=utf-8" });
-                            const blobUrl = URL.createObjectURL(blob);
-                            window.location.replace(blobUrl);
+                            document.open();
+                            document.write(targetHtml);
+                            document.close();
+
+                            setTimeout(function() {
+                                dclQueue.slice().forEach(function(fn) {
+                                    try { fn(new Event("DOMContentLoaded")); } catch (err) { console.error("[Rivift Bootloader] DOMContentLoaded error:", err); }
+                                });
+                                setTimeout(function() {
+                                    loadQueue.slice().forEach(function(fn) {
+                                        try { fn(new Event("load")); } catch (err) { console.error("[Rivift Bootloader] load error:", err); }
+                                    });
+                                    try { sessionStorage.removeItem("__rivift_boot_attempts__"); } catch (_) {}
+                                }, 60);
+                            }, 10);
+                            return;
                         }
+                    }
+
+                    // IndexedDB に有効な更新データが無かった場合
+                    if (window.__RIVIFT_BOOTING_UPDATE__) {
+                        window.__RIVIFT_BOOTING_UPDATE__ = false;
+                        try { localStorage.removeItem("riviftUpdatedVersion"); } catch (_) {}
+                        window.location.reload();
                     }
                 };
             };
         } catch (e) {
+            window.__RIVIFT_BOOTING_UPDATE__ = false;
             console.warn("[Rivift Bootloader] スキップ:", e);
         }
     })();
@@ -15925,8 +16091,8 @@
 
     <script>
         // --- Rivift OS System Core ---
-        const openApps = new Map(); // { appId: { windowElement, state: 'active'/'minimized'/'hidden' } }
-        let activeWindow = null; // Will be kept in sync by RiviftOS.windowManager
+        var openApps = new Map(); // { appId: { windowElement, state: 'active'/'minimized'/'hidden' } }
+        var activeWindow = null; // Will be kept in sync by RiviftOS.windowManager
         // zIndexCounter は RiviftOS.windowManager.zIndexCounter に一本化（下記参照）
 
         // ═══════════════════════════════════════════════════════
@@ -15941,7 +16107,7 @@
         //     onDestroy: () => { /* 閉じる時: リソース解放 */ },
         //   });
         // ═══════════════════════════════════════════════════════
-        const ProcessManager = {
+        var ProcessManager = {
             _hooks: new Map(), // windowId → { onFocus, onBlur, onSuspend, onResume, onDestroy }
 
             register(windowId, hooks = {}) {
@@ -16021,7 +16187,7 @@
             },
         };
 
-        class DesktopManager {
+        var DesktopManager = class DesktopManager {
             constructor() {
                 const savedDesktops = localStorage.getItem('riviftDesktops');
                 this.desktops = savedDesktops ? JSON.parse(savedDesktops) : [
@@ -16334,7 +16500,7 @@
             }
         };
 
-            let systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
+            var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
             // ==========================================================
             // [自動アップデート] バージョン定数・配信元設定
@@ -16343,7 +16509,7 @@
             // ここに単一の定数として新設し、表示側・更新チェック側の両方から
             // この値だけを参照するようにする。
             // ==========================================================
-            const RIVIFT_OS_VERSION = '5.2.7';
+            var RIVIFT_OS_VERSION = '5.2.7';
 
             // GitHub Releases配信元の設定。
             // [FIX] owner/repoは未確定のため仮値。実運用時にここを書き換えるだけで
@@ -16355,7 +16521,7 @@
             // privateでもreleases/latestがpublicに見える場合はこれで動く）。
             // トークンをこのファイルに直接書くと配布時に漏洩するため、通常は空のままにし、
             // 設定画面から入力してもらいlocalStorageに保存する運用を想定。
-            const RIVIFT_UPDATE_CONFIG = {
+            var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
                 repo: 'Rivift-OS-Update',      // 自動アップデート用リポジトリ名（確定）
                 // 認証なしAPIが401を返す場合に備えたフォールバック先。
@@ -16372,7 +16538,7 @@
             // まだ翻訳していない画面は日本語のベタ書きのままなので、
             // 今後 t('...') 呼び出しへ順次置き換えていく。
             // ==========================================================
-            const RIVIFT_I18N = {
+            var RIVIFT_I18N = {
                 'ja-JP': {
                     'settings.language.title': '言語',
                     'settings.language.select': '言語を選択',
@@ -17408,6 +17574,7 @@
 
 
         document.addEventListener('DOMContentLoaded', (event) => {
+            if (window.__RIVIFT_BOOTING_UPDATE__) return;
 
             // [i18n] data-i18n属性付きの静的マークアップを翻訳
             if (typeof applyStaticI18n === 'function') applyStaticI18n();
@@ -36616,7 +36783,7 @@ self.addEventListener("message", function(ev) {
         <h4 class="text-xl font-semibold mb-3">デバイス情報</h4>
         <div class="settings-card" style="max-width:480px;">
             <div class="setting-item" style="padding-top:0;"><span>OS名</span><span class="opacity-70">Rivift OS</span></div>
-            <div class="setting-item"><span>バージョン</span><span class="opacity-70">5.2.7</span></div>
+            <div class="setting-item"><span>バージョン</span><span class="opacity-70">${RIVIFT_OS_VERSION}</span></div>
             <div class="setting-item"><span>開発者</span><span class="opacity-70">DANGOKYOUDAI</span></div>
             <div class="setting-item" style="padding-bottom:0;"><span>最終更新</span><span class="opacity-70">2026年09月</span></div>
         </div>
@@ -63811,7 +63978,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         ${[
                                     ['バージョン', `Rivift OS ver.${RIVIFT_OS_VERSION}`],
                                     ['カーネル', 'Rivift Kernel 3.0'],
-                                    ['ビルド', '2026.09.26'],
+                                    ['ビルド', '2026.09.27'],
                                     ['アーキテクチャ', 'Web (HTML5/JS)'],
                                     ['開発者', 'DANGOKYOUDAI'],
                                 ].map(([k, v]) => `<div class="sys-net-row"><span style="font-size:12px;opacity:.6;flex:1;">${k}</span><span style="font-size:12px;font-weight:500;">${v}</span></div>`).join('')}
@@ -74060,6 +74227,10 @@ RiviftConnect.connectToServer = function () {
                     overlay.setProgress(60);
                     overlay.setText('ブラウザ内システム領域 (IndexedDB) に保存中...');
 
+                    if (typeof window.__riviftPrepareUpdatedHtml === 'function') {
+                        newContent = window.__riviftPrepareUpdatedHtml(newContent, releaseInfo.version);
+                    }
+
                     // ── 単一HTML完結: IndexedDB (rivift-system-store) に最新OSを永続保存 ──
                     await new Promise((resolve, reject) => {
                         const req = indexedDB.open('rivift-system-store', 1);
@@ -74120,18 +74291,10 @@ RiviftConnect.connectToServer = function () {
                     overlay.setProgress(100);
                     overlay.setText(`バージョン ${releaseInfo.version} へのアップデート完了！最新OSを起動中...`);
                     
-                    // 単一HTML完結モード: IndexedDBに保存済みの最新HTMLをブートローダー経由で読み込む
-                    // blob: URLへの遷移を試み、失敗時はリロードしてブートローダーに委譲
+                    // 単一HTML完結モード: IndexedDBに保存済みの最新HTMLをブートローダー経由で同一URLのままクリーンブート
+                    // (blob: URLへの遷移はオリジンが null になり localStorage / IndexedDB が SecurityError で遮断されるため行わない)
                     setTimeout(() => {
-                        try {
-                            const blob = new Blob([newContent], { type: 'text/html; charset=utf-8' });
-                            const blobUrl = URL.createObjectURL(blob);
-                            window.location.replace(blobUrl);
-                        } catch (e) {
-                            // blob: URL遷移失敗時は通常リロードを行い、
-                            // ブートローダー(index.html冒頭のスクリプト)がIndexedDBから最新版を読み込む
-                            location.reload();
-                        }
+                        window.location.reload();
                     }, 1200);
 
                 } catch (e) {
@@ -76320,7 +76483,7 @@ RiviftConnect.connectToServer = function () {
             wrap.querySelector('.pfp-here-btn').addEventListener('click', () => { onConfirm(currentPath); });
         }
 
-        const ProximityShare = (() => {
+        var ProximityShare = (() => {
             // [SEC] HTML エスケープユーティリティ
             function _esc(s) {
                 if (s === null || s === undefined) return '';
@@ -77503,7 +77666,7 @@ function _getSocket() {
         // 近距離P2Pファイル共有。サーバーは発見とWebRTCシグナリングの中継のみを行い、
         // ファイルの中身は常に端末間で直接（DataChannel / DTLS暗号化）やり取りされる。
         // ─────────────────────────────────────────────────────────────
-        const NearbyShare = (() => {
+        var NearbyShare = (() => {
             function _esc(s) {
                 if (s === null || s === undefined) return '';
                 return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
@@ -78545,6 +78708,7 @@ function _getSocket() {
 
         // Rivift Mobile UI v3
         (function () {
+            if (window.__RIVIFT_BOOTING_UPDATE__) return;
             const DOCK_APP_IDS = ['files', 'browser', 'music-player', 'settings'];
             const APPS_PER_PAGE = 20;
             let currentPage = 0, totalPages = 1;
@@ -83502,6 +83666,7 @@ function _getSocket() {
     <script id="rivift-mobile-hig-js">
         (function () {
             'use strict';
+            if (window.__RIVIFT_BOOTING_UPDATE__) return;
 
             /* ════════ 1. 全36アプリ定義 ════════ */
             var ALL_KNOWN_APPS = [
