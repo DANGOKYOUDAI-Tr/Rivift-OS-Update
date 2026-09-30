@@ -97,7 +97,7 @@
 
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
-        var CURRENT_FILE_VERSION = "5.2.8";
+        var CURRENT_FILE_VERSION = "5.2.9";
         function compareVer(a, b) {
             var clean = function(v) { return String(v || "").replace(/^v/i, "").trim(); };
             var pa = clean(a).split(".").map(function(n) { return parseInt(n, 10) || 0; });
@@ -16797,7 +16797,7 @@
             // ここに単一の定数として新設し、表示側・更新チェック側の両方から
             // この値だけを参照するようにする。
             // ==========================================================
-            var RIVIFT_OS_VERSION = '5.2.8';
+            var RIVIFT_OS_VERSION = '5.2.9';
 
             // GitHub Releases配信元の設定。
             // [FIX] owner/repoは未確定のため仮値。実運用時にここを書き換えるだけで
@@ -17908,21 +17908,17 @@
 
                 addEventListener(type, fn) {
                     if (type === 'message') {
-                        this._msgListeners.push(fn);
-                        if (this._worker) this._worker.addEventListener('message', fn);
+                        if (!this._msgListeners.includes(fn)) this._msgListeners.push(fn);
                     } else if (type === 'error') {
-                        this._errListeners.push(fn);
-                        if (this._worker) this._worker.addEventListener('error', fn);
+                        if (!this._errListeners.includes(fn)) this._errListeners.push(fn);
                     }
                 }
 
                 removeEventListener(type, fn) {
                     if (type === 'message') {
                         this._msgListeners = this._msgListeners.filter(f => f !== fn);
-                        if (this._worker) this._worker.removeEventListener('message', fn);
                     } else if (type === 'error') {
                         this._errListeners = this._errListeners.filter(f => f !== fn);
-                        if (this._worker) this._worker.removeEventListener('error', fn);
                     }
                 }
 
@@ -20088,8 +20084,20 @@ VFS.init();
             // --- 壁紙読み込み・汎用ファイルローダー（既存のVFS Workerを再利用してメモリ・起動負荷を削減） ---
             const wallpaperLoaderWorker = {
                 onmessage: null,
+                _msgListeners: [],
+                addEventListener(type, fn) {
+                    if (type === 'message' && typeof fn === 'function' && !this._msgListeners.includes(fn)) {
+                        this._msgListeners.push(fn);
+                    }
+                },
+                removeEventListener(type, fn) {
+                    if (type === 'message') {
+                        this._msgListeners = this._msgListeners.filter(f => f !== fn);
+                    }
+                },
                 async postMessage(data) {
                     const { wallpaperList = [], currentWallpaper } = data || {};
+                    await Promise.resolve();
                     await VFS.init();
                     const previewHtmlPromises = wallpaperList.map(async (url) => {
                         let dataUrl = url;
@@ -20108,9 +20116,13 @@ VFS.init();
           `;
                     });
                     const finalHtml = (await Promise.all(previewHtmlPromises)).join('');
+                    const evt = { data: finalHtml };
                     if (typeof this.onmessage === 'function') {
-                        this.onmessage({ data: finalHtml });
+                        this.onmessage(evt);
                     }
+                    this._msgListeners.slice().forEach(fn => {
+                        try { fn(evt); } catch (err) { console.error('[wallpaperLoaderWorker]', err); }
+                    });
                 },
                 terminate() {}
             };
@@ -30886,10 +30898,12 @@ self.onmessage = async (e) => {
                 // [FIX] モバイルモード時はデスクトップ用インラインスタイルを書かない。
                 // 後から cssText 上書きや !important で競合するのを根本から防ぐ。
                 if (!window._mobileAppendTarget) {
+                    const initLeft = Math.max(0, Math.round((window.innerWidth - width) / 2));
+                    const initTop = Math.max(0, Math.round((window.innerHeight - height) / 2));
                     windowElement.style.width = `${width}px`;
                     windowElement.style.height = `${height}px`;
-                    windowElement.style.left = `calc(50% - ${width / 2}px)`;
-                    windowElement.style.top = `calc(50% - ${height / 2}px)`;
+                    windowElement.style.left = `${initLeft}px`;
+                    windowElement.style.top = `${initTop}px`;
                 }
 
                 // ── originRect指定時: 中央からの固定scaleではなく、
@@ -30899,8 +30913,8 @@ self.onmessage = async (e) => {
                 if (options.originRect && !window._mobileAppendTarget) {
                     // 実際のピクセル位置を得るため、デスクトップ要素基準で最終位置のpx換算値を計算する。
                     const deskRect = desktop.getBoundingClientRect();
-                    const finalLeftPx = (deskRect.width / 2) - (width / 2);
-                    const finalTopPx = (deskRect.height / 2) - (height / 2);
+                    const finalLeftPx = Math.max(0, (deskRect.width / 2) - (width / 2));
+                    const finalTopPx = Math.max(0, (deskRect.height / 2) - (height / 2));
                     const { left: originLeft, top: originTop, width: originW, height: originH } = options.originRect;
                     const scaleX = Math.max(originW, 1) / width;
                     const scaleY = Math.max(originH, 1) / height;
@@ -31038,7 +31052,11 @@ self.onmessage = async (e) => {
                                 if (dir.includes('e')) newW = Math.max(minW, startWidth + dx);
                                 if (dir.includes('s')) newH = Math.max(minH, startHeight + dy);
                                 if (dir.includes('w')) { newW = Math.max(minW, startWidth - dx); newLeft = startLeft + (startWidth - newW); }
-                                if (dir.includes('n')) { newH = Math.max(minH, startHeight - dy); newTop = startTop + (startHeight - newH); }
+                                if (dir.includes('n')) {
+                                    const maxNorthH = startTop + startHeight;
+                                    newH = Math.min(maxNorthH, Math.max(minH, startHeight - dy));
+                                    newTop = Math.max(0, startTop + (startHeight - newH));
+                                }
 
                                 windowElement.style.width = `${newW}px`;
                                 windowElement.style.height = `${newH}px`;
@@ -31125,8 +31143,8 @@ self.onmessage = async (e) => {
                         windowElement.style.height = `${appData.originalPos.height}px`;
                         // X座標：マウスの位置から、復元後のウィンドウ幅の半分を引く
                         windowElement.style.left = `${e.clientX - (restoredWidth / 2)}px`;
-                        // Y座標：マウスの位置から、ヘッダーの高さの半分(20px)を引く
-                        windowElement.style.top = `${e.clientY - 20}px`;
+                        // Y座標：マウスの位置から、ヘッダーの高さの半分(20px)を引く（画面上端より上には出さない）
+                        windowElement.style.top = `${Math.max(0, e.clientY - 20)}px`;
 
                         // 3. フラグやスタイルを更新
                         windowElement.classList.remove('maximized');
@@ -31243,8 +31261,15 @@ self.onmessage = async (e) => {
                     // ドラッグ状態でなければ無視（取り逃がし対策）
                     if (!windowElement._dragState?.isDragging) return;
 
-                    windowElement.style.left = `${e.clientX - offsetX}px`;
-                    windowElement.style.top = `${e.clientY - offsetY}px`;
+                    const winW = windowElement.offsetWidth || 300;
+                    const minLeft = -(winW - 80);
+                    const maxLeft = Math.max(0, window.innerWidth - 80);
+                    const maxTop = Math.max(0, window.innerHeight - 40);
+                    const nextLeft = Math.max(minLeft, Math.min(maxLeft, e.clientX - offsetX));
+                    const nextTop = Math.max(0, Math.min(maxTop, e.clientY - offsetY));
+
+                    windowElement.style.left = `${nextLeft}px`;
+                    windowElement.style.top = `${nextTop}px`;
 
                     // [FIX] 以前は下の方で const ds を再宣言していたため、
                     // ここで ds を参照した時点で TDZ (Temporal Dead Zone) による
@@ -31716,8 +31741,59 @@ self.onmessage = async (e) => {
                 contentEl.style.setProperty('--rivift-content-maxw', `${maxW}px`);
             }
 
+            function clampWindowPositionToViewport(windowEl) {
+                if (!windowEl || windowEl.classList.contains('mobile-app-window')) return;
+                if (window.isMissionControlActive || windowEl.classList.contains('in-mission-control') || windowEl._closingAnim) return;
+
+                const appData = openApps.get(windowEl.id);
+                const taskbarHeight = (typeof taskbarAlwaysVisible !== 'undefined' && taskbarAlwaysVisible && taskbar) ? taskbar.offsetHeight : 0;
+                const vw = Math.max(320, window.innerWidth);
+                const vh = Math.max(200, window.innerHeight - taskbarHeight);
+
+                if (appData) {
+                    if (appData.originalPos) {
+                        appData.originalPos.y = Math.max(0, Math.min(Math.max(0, vh - 40), appData.originalPos.y || 0));
+                    }
+                    if (appData.isMaximized) {
+                        windowEl.style.left = '0px';
+                        windowEl.style.top = '0px';
+                        windowEl.style.width = '100vw';
+                        windowEl.style.height = `${vh}px`;
+                        return;
+                    }
+                    if (appData.isSnapped) {
+                        return;
+                    }
+                    if (appData.state === 'minimized' || windowEl.style.display === 'none') {
+                        return;
+                    }
+                }
+
+                const winW = windowEl.offsetWidth || parseInt(windowEl.style.width, 10) || 400;
+                let curLeft = windowEl.offsetLeft;
+                let curTop = windowEl.offsetTop;
+
+                const minLeft = -(winW - 80);
+                const maxLeft = Math.max(0, vw - 80);
+                const minTop = 0;
+                const maxTop = Math.max(0, window.innerHeight - 40);
+
+                const clampedLeft = Math.max(minLeft, Math.min(maxLeft, curLeft));
+                const clampedTop = Math.max(minTop, Math.min(maxTop, curTop));
+
+                if (clampedLeft !== curLeft || (windowEl.style.left && windowEl.style.left.includes('calc'))) {
+                    windowEl.style.left = `${clampedLeft}px`;
+                }
+                if (clampedTop !== curTop || curTop < 0 || (windowEl.style.top && windowEl.style.top.includes('calc'))) {
+                    windowEl.style.top = `${clampedTop}px`;
+                }
+            }
+
             window.addEventListener('resize', () => {
-                document.querySelectorAll('.app-window').forEach(win => updateWindowContentLayout(win));
+                document.querySelectorAll('.app-window').forEach(win => {
+                    clampWindowPositionToViewport(win);
+                    updateWindowContentLayout(win);
+                });
             });
 
             // [AWR] createWindowをAppWorkerRuntimeでラップ
@@ -31966,7 +32042,10 @@ self.onmessage = async (e) => {
                     panel.style.left = `${rect.left}px`; panel.style.top = `${rect.top}px`;
                     panel.style.transform = 'none'; panel.offsetWidth;
                     panel.style.transition = prevT;
-                    const onMove = mv => { panel.style.left = `${mv.clientX - ox}px`; panel.style.top = `${mv.clientY - oy}px`; };
+                    const onMove = mv => {
+                        panel.style.left = `${Math.max(0, Math.min(window.innerWidth - 80, mv.clientX - ox))}px`;
+                        panel.style.top = `${Math.max(0, Math.min(window.innerHeight - 40, mv.clientY - oy))}px`;
+                    };
                     const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
                     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
                 });
@@ -33087,12 +33166,19 @@ self.onmessage = async (e) => {
                         newStyles.top = '0px';
                         isMaximized = true;
                         break;
-                    case 'restore':
-                        newStyles.width = `${appData.originalPos.width}px`;
-                        newStyles.height = `${appData.originalPos.height}px`;
-                        newStyles.left = `${appData.originalPos.x}px`;
-                        newStyles.top = `${appData.originalPos.y}px`;
+                    case 'restore': {
+                        const restoredW = appData.originalPos.width;
+                        const restoredH = appData.originalPos.height;
+                        const minLeft = -(restoredW - 80);
+                        const maxLeft = Math.max(0, desktopWidth - 80);
+                        const restoredX = Math.max(minLeft, Math.min(maxLeft, appData.originalPos.x));
+                        const restoredY = Math.max(0, Math.min(Math.max(0, desktopHeight - 40), appData.originalPos.y));
+                        newStyles.width = `${restoredW}px`;
+                        newStyles.height = `${restoredH}px`;
+                        newStyles.left = `${restoredX}px`;
+                        newStyles.top = `${restoredY}px`;
                         break;
+                    }
                     case 'half-left':
                     case 'half-right':
                     case 'quarter-top-left':
@@ -34685,10 +34771,10 @@ function isDeterministicCode(code) {
     return !/\\b(?:rand|srand|time|clock|random|datetime\\.now|perf_counter)\\s*\\(/.test(code);
 }
 
-async function runC(runId, code, stdin) {
+async function runC(runId, code, stdin, files) {
     var start = performance.now();
     var cacheKey = getCacheKey("c", code, stdin);
-    var det = isDeterministicCode(code);
+    var det = isDeterministicCode(code) && (!files || Object.keys(files).length === 0);
     if (det && _execCache.has(cacheKey)) {
         var cached = _execCache.get(cacheKey);
         var durCached = Math.max(1, Math.round(performance.now() - start));
@@ -34701,7 +34787,7 @@ async function runC(runId, code, stdin) {
     // 1. 高速ローカル C/C++ JIT ランタイムで即時実行 (待機時間 0ms)
     if (! shouldForceRemoteC(code)) {
         try {
-            var localRes = runLocalC(code, stdin || "");
+            var localRes = runLocalC(code, stdin || "", files || {});
             var durationMs = Math.max(1, Math.round(performance.now() - start));
             if (det) {
                 if (_execCache.size > 100) _execCache.delete(_execCache.keys().next().value);
@@ -34777,7 +34863,7 @@ async function runC(runId, code, stdin) {
 
     // 3. 最終診断フォールバック
     try {
-        var finalRes = runLocalC(code, stdin || "");
+        var finalRes = runLocalC(code, stdin || "", files || {});
         var durFinal = Math.max(1, Math.round(performance.now() - start));
         if (finalRes.stdout) postMessage({ type: "stdout", channel: "c", runId: runId, text: finalRes.stdout });
         if (finalRes.stderr) postMessage({ type: "stderr", channel: "c", runId: runId, text: finalRes.stderr });
@@ -34795,9 +34881,10 @@ function shouldForceRemoteC(code) {
     return /\\b__asm__\\b|\\basm\\s*\\(|\\btemplate\\s*<[^>]*class[^>]*,/.test(code);
 }
 
-function runLocalC(rawCode, stdinText) {
+function runLocalC(rawCode, stdinText, vfsFiles) {
     var out = "";
     var errOut = "";
+    var filesMap = Object.assign({}, vfsFiles || {});
     var stdinTokens = String(stdinText || "").trim().split(/\\s+/).filter(Boolean);
     var stdinLines = String(stdinText || "").split(/\\r?\\n/);
     var tokenIdx = 0;
@@ -34872,8 +34959,47 @@ function runLocalC(rawCode, stdinText) {
     function __c_fprintf(stream) {
         var rest = Array.prototype.slice.call(arguments, 1);
         var txt = cSprintf.apply(null, rest);
+        if (stream && typeof stream === "object" && stream.__isFile) {
+            stream.content += txt;
+            filesMap[stream.name] = stream.content;
+            return txt.length;
+        }
         if (stream === 2 || stream === "stderr") errOut += txt;
         else out += txt;
+        return 0;
+    }
+    function __c_fopen(fname, mode) {
+        var clean = String(fname || "").replace(/^\\.\\//, "");
+        var base = clean.split("/").pop();
+        var m = String(mode || "r");
+        if (m.indexOf("w") !== -1) {
+            filesMap[clean] = "";
+            return { __isFile: true, name: clean, content: "", pos: 0, lines: [], lineIdx: 0 };
+        }
+        var content = filesMap[clean] !== undefined ? filesMap[clean] : filesMap[base];
+        if (content === undefined) return null;
+        var s = String(content);
+        return { __isFile: true, name: clean, content: s, pos: 0, lines: s.split(/\\r?\\n/), lineIdx: 0 };
+    }
+    function __c_fgets(buf, sz, fp) {
+        if (!fp || !fp.__isFile) return null;
+        if (fp.lineIdx >= fp.lines.length) return null;
+        var ln = fp.lines[fp.lineIdx++];
+        if (fp.lineIdx <= fp.lines.length - 1) ln += NL;
+        if (Array.isArray(buf)) {
+            buf.length = 0;
+            for (var i = 0; i < ln.length; i++) buf.push(ln.charAt(i));
+            buf.toString = function() { return this.join(""); };
+        }
+        return ln;
+    }
+    function __c_fputs(s, fp) {
+        if (fp && fp.__isFile) { fp.content += String(s); filesMap[fp.name] = fp.content; return 0; }
+        out += String(s);
+        return 0;
+    }
+    function __c_fclose(fp) {
+        if (fp && fp.__isFile) filesMap[fp.name] = fp.content;
         return 0;
     }
     function __c_puts(s) {
@@ -35134,13 +35260,15 @@ function runLocalC(rawCode, stdinText) {
         "const qsort = (arr, n, sz, cmp) => { if (Array.isArray(arr)) arr.sort(cmp || ((a,b)=>a-b)); };",
         "const assert = (cond) => { if (!cond) { const e = new Error('Assertion failed'); e.__cRuntimeError = true; throw e; } };",
         "const exit = (c) => { throw { __cExit: true, code: c || 0 }; };",
+        "const fopen = __c_fopen, fgets = __c_fgets, fputs = __c_fputs, fclose = __c_fclose, fprintf = __c_fprintf, sprintf = cSprintf, snprintf = (b, n, f, ...a) => cSprintf(f, ...a);",
+        "const LoadFileText = (p) => { const f = __c_fopen(p, 'r'); return f ? f.content : ''; }, UnloadFileText = () => {}, FileExists = (p) => !!__c_fopen(p, 'r');",
         "const __c_make_arr = (len, init) => { const a = new Array(Math.max(len || 0, init.length)).fill(0); for (let i = 0; i < init.length; i++) a[i] = init[i]; return a; };",
         "var calc_fib = function(n) { if (n <= 1) return n; var a = 0, b = 1; for (var i = 2; i <= n; i++) { var t = a + b; a = b; b = t; } return b; };"
     ].join("\\n");
 
-    var runnerFn = new Function("__c_printf", "__c_fprintf", "__c_puts", "__c_putchar", "__c_getchar", "__c_scanf", "__c_cin_next", "__c_gets", "cSprintf", "Math",
+    var runnerFn = new Function("__c_printf", "__c_fprintf", "__c_puts", "__c_putchar", "__c_getchar", "__c_scanf", "__c_cin_next", "__c_gets", "cSprintf", "Math", "__c_fopen", "__c_fgets", "__c_fputs", "__c_fclose",
         stdlibPrelim + "\\n" + src + "\\nif (typeof main === 'function') { try { const _ret = main(1, ['program']); return typeof _ret === 'number' ? _ret : 0; } catch(_e) { if (_e && _e.__cExit) return _e.code; throw _e; } } return 0;");
-    var exitCode = runnerFn(__c_printf, __c_fprintf, __c_puts, __c_putchar, __c_getchar, __c_scanf, __c_cin_next, __c_gets, cSprintf, Math);
+    var exitCode = runnerFn(__c_printf, __c_fprintf, __c_puts, __c_putchar, __c_getchar, __c_scanf, __c_cin_next, __c_gets, cSprintf, Math, __c_fopen, __c_fgets, __c_fputs, __c_fclose);
     return { stdout: out, stderr: errOut, exitCode: typeof exitCode === "number" ? exitCode : 0 };
 }
 
@@ -35149,10 +35277,25 @@ function shouldForceRemotePython(code) {
     return /^\\s*(?:import|from)\\s+(?:numpy|pandas|matplotlib|scipy|sympy|sklearn|cv2|PIL|requests|asyncio)\\b/m.test(code);
 }
 
-function runLocalPython(rawCode, stdinText) {
+function runLocalPython(rawCode, stdinText, vfsFiles) {
     var out = "";
+    var filesMap = Object.assign({}, vfsFiles || {});
     var stdinLines = String(stdinText || "").split(/\\r?\\n/);
     var lineIdx = 0;
+
+    function __py_open(fname, mode) {
+        var clean = String(fname || "").replace(/^\\.\\//, "");
+        var base = clean.split("/").pop();
+        var m = String(mode || "r");
+        if (m.indexOf("w") !== -1) filesMap[clean] = "";
+        var content = filesMap[clean] !== undefined ? filesMap[clean] : (filesMap[base] !== undefined ? filesMap[base] : "");
+        return {
+            read: function() { return String(filesMap[clean] !== undefined ? filesMap[clean] : content); },
+            readlines: function() { return String(filesMap[clean] !== undefined ? filesMap[clean] : content).split(/\\r?\\n/); },
+            write: function(s) { filesMap[clean] = (filesMap[clean] || "") + String(s); return String(s).length; },
+            close: function() {}
+        };
+    }
 
     function __py_print() {
         var args = Array.prototype.slice.call(arguments);
@@ -35413,7 +35556,7 @@ function runLocalPython(rawCode, stdinText) {
     }
 
     var pyPrelim = [
-        "const print = __py_print, input = __py_input, range = __py_range, str = __py_str;",
+        "const print = __py_print, input = __py_input, range = __py_range, str = __py_str, open = __py_open;",
         "const len = (x) => (x && x.length !== undefined) ? x.length : (x && typeof x === 'object' ? Object.keys(x).length : 0);",
         "const sum = (arr, init = 0) => Array.from(arr || []).reduce((a, b) => a + b, init);",
         "const min = (...a) => a.length === 1 && Array.isArray(a[0]) ? Math.min(...a[0]) : Math.min(...a);",
@@ -35433,16 +35576,16 @@ function runLocalPython(rawCode, stdinText) {
         "const time = { time: () => Date.now() / 1000, sleep: () => {} };"
     ].join("\\n");
 
-    var fn = new Function("__py_print", "__py_input", "__py_range", "__py_str", "__py_fmt", "Math",
+    var fn = new Function("__py_print", "__py_input", "__py_range", "__py_str", "__py_fmt", "Math", "__py_open",
         pyPrelim + "\\n" + jsLines.join("\\n"));
-    fn(__py_print, __py_input, __py_range, __py_str, __py_fmt, Math);
+    fn(__py_print, __py_input, __py_range, __py_str, __py_fmt, Math, __py_open);
     return { stdout: out, stderr: "", exitCode: 0 };
 }
 
-async function runPython(runId, code, stdin) {
+async function runPython(runId, code, stdin, files) {
     var start = performance.now();
     var cacheKey = getCacheKey("python", code, stdin);
-    var det = isDeterministicCode(code);
+    var det = isDeterministicCode(code) && (!files || Object.keys(files).length === 0);
     if (det && _execCache.has(cacheKey)) {
         var cached = _execCache.get(cacheKey);
         var durCached = Math.max(1, Math.round(performance.now() - start));
@@ -35455,7 +35598,7 @@ async function runPython(runId, code, stdin) {
     // 1. 高速ローカル Python 3 ランタイムで即時実行 (待機時間 0ms)
     if (!shouldForceRemotePython(code)) {
         try {
-            var localPy = runLocalPython(code, stdin || "");
+            var localPy = runLocalPython(code, stdin || "", files || {});
             var durLocal = Math.max(1, Math.round(performance.now() - start));
             if (det) {
                 if (_execCache.size > 100) _execCache.delete(_execCache.keys().next().value);
@@ -35478,6 +35621,11 @@ async function runPython(runId, code, stdin) {
             var pyErr = "";
             self._pyodide.setStdout({ batched: function(txt) { pyOut += txt + NL; postMessage({ type: "stdout", channel: "python", runId: runId, text: txt + NL }); } });
             self._pyodide.setStderr({ batched: function(txt) { pyErr += txt + NL; postMessage({ type: "stderr", channel: "python", runId: runId, text: txt + NL }); } });
+            if (files && typeof files === "object") {
+                Object.keys(files).forEach(function(fn) {
+                    try { self._pyodide.FS.writeFile(fn.split("/").pop(), String(files[fn])); } catch (_) {}
+                });
+            }
             if (stdin) {
                 self._pyodide.globals.set("__rivift_stdin__", String(stdin));
                 await self._pyodide.runPythonAsync("import sys, io\\nsys.stdin = io.StringIO(__rivift_stdin__)");
@@ -35583,9 +35731,9 @@ self.addEventListener("message", function(ev) {
     if (msg.type === "init-cc" || msg.type === "init") {
         postMessage({ type: "cc-status", state: "ready", detail: "Rivift Code Runner 準備完了" });
     } else if (msg.type === "run-c") {
-        runC(msg.runId || 1, msg.code, msg.stdin || msg.input || "");
+        runC(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {});
     } else if (msg.type === "run-python") {
-        runPython(msg.runId || 1, msg.code, msg.stdin || msg.input || "");
+        runPython(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {});
     }
 });`;
 
@@ -35660,6 +35808,670 @@ self.addEventListener("message", function(ev) {
                         return 0;
                     }
                 };
+            };
+
+            // ── 同一階層・ワークスペース内のファイル収集＆依存解決＆Raylib/GBA動的Cエンジン ──
+            window._riviftReadVfsText = async function(path) {
+                try {
+                    const fd = await readFileWithWorker(path);
+                    if (!fd || !fd.content) return '';
+                    if (typeof fd.content === 'string' && fd.content.startsWith('data:')) {
+                        const r = await fetch(fd.content);
+                        return await r.text();
+                    }
+                    return String(fd.content);
+                } catch (_) { return ''; }
+            };
+
+            window._riviftCollectDirFiles = async function(dirs, openTabsList = []) {
+                const fileTextMap = {};
+                const assetUrlMap = {};
+                const uniqueDirs = Array.from(new Set((dirs || []).filter(Boolean)));
+                for (const d of uniqueDirs) {
+                    try {
+                        const list = (await VFS.listFiles(d)) || [];
+                        for (const it of list) {
+                            if (!it || it.type === 'folder' || !it.name) continue;
+                            if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(it.name)) {
+                                try {
+                                    const fd = await readFileWithWorker(it.path);
+                                    if (fd && fd.content) assetUrlMap[it.name] = fd.content;
+                                } catch (_) {}
+                            } else {
+                                const txt = await window._riviftReadVfsText(it.path);
+                                if (txt) fileTextMap[it.name] = txt;
+                            }
+                        }
+                    } catch (_) {}
+                }
+                for (const t of (openTabsList || [])) {
+                    if (t && t.name && t.model && typeof t.model.getValue === 'function') {
+                        fileTextMap[t.name] = t.model.getValue();
+                    }
+                }
+                return { files: fileTextMap, assets: assetUrlMap };
+            };
+
+            window._riviftResolveCodeIncludes = async function(rawCode, lang, dirs = [], openTabsList = []) {
+                if (!rawCode) return { code: '', files: {}, assets: {} };
+                const { files, assets } = await window._riviftCollectDirFiles(dirs, openTabsList);
+                let resolved = rawCode;
+
+                if (lang === 'c' || lang === 'cpp' || lang === 'raylib' || lang === 'devkitpro') {
+                    const seen = new Set();
+                    for (let depth = 0; depth < 5; depth++) {
+                        const incMatches = Array.from(resolved.matchAll(/^[ \t]*#[ \t]*include[ \t]+"([^"]+)"/gm));
+                        if (incMatches.length === 0) break;
+                        let changed = false;
+                        for (const m of incMatches) {
+                            const incName = m[1];
+                            const baseName = incName.split('/').pop();
+                            if (baseName === 'raylib.h' || baseName === 'gba.h' || seen.has(incName)) continue;
+                            let hText = files[incName] || files[baseName] || '';
+                            if (!hText && typeof VFS !== 'undefined' && typeof VFS.search === 'function') {
+                                try {
+                                    const found = await VFS.search(baseName);
+                                    const matchItem = (found || []).find(f => f.type !== 'folder' && f.name === baseName);
+                                    if (matchItem && matchItem.path) {
+                                        hText = await window._riviftReadVfsText(matchItem.path);
+                                        if (hText) files[baseName] = hText;
+                                    }
+                                } catch (_) {}
+                            }
+                            if (hText) {
+                                seen.add(incName);
+                                const re = new RegExp(`^[ \\t]*#[ \\t]*include[ \\t]+"${incName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'gm');
+                                resolved = resolved.replace(re, `\n/* --- begin ${incName} --- */\n${hText}\n/* --- end ${incName} --- */\n`);
+                                // 対応する同名 .c / .cpp ファイルも同じ階層にあれば自動リンク結合
+                                const stem = baseName.replace(/\.h(pp)?$/i, '');
+                                for (const ext of ['.c', '.cpp']) {
+                                    const implName = stem + ext;
+                                    if (files[implName] && !seen.has(implName) && !resolved.includes(files[implName])) {
+                                        seen.add(implName);
+                                        const implCode = files[implName].replace(/\b(?:int|void)\s+main\s*\(/g, 'int __unused_sub_main_' + stem + '(');
+                                        resolved += `\n/* --- linked ${implName} --- */\n${implCode}\n`;
+                                    }
+                                }
+                                changed = true;
+                            }
+                        }
+                        if (!changed) break;
+                    }
+                } else if (lang === 'python') {
+                    // 同一階層のローカル .py モジュール import をインライン解決
+                    const pyImports = Array.from(resolved.matchAll(/^[ \t]*(?:from[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+import[ \t]+([^\r\n#]+)|import[ \t]+([A-Za-z_][A-Za-z0-9_]*))[ \t]*$/gm));
+                    for (const m of pyImports) {
+                        const modName = m[1] || m[3];
+                        if (!modName) continue;
+                        const pyFile = modName + '.py';
+                        let modCode = files[pyFile] || '';
+                        if (!modCode && typeof VFS !== 'undefined' && typeof VFS.search === 'function') {
+                            try {
+                                const found = await VFS.search(pyFile);
+                                const matchItem = (found || []).find(f => f.type !== 'folder' && f.name === pyFile);
+                                if (matchItem && matchItem.path) {
+                                    modCode = await window._riviftReadVfsText(matchItem.path);
+                                    if (modCode) files[pyFile] = modCode;
+                                }
+                            } catch (_) {}
+                        }
+                        if (modCode) {
+                            resolved = resolved.replace(m[0], `# --- begin module ${pyFile} ---\n${modCode}\n# --- end module ${pyFile} ---`);
+                        }
+                    }
+                } else if (lang === 'javascript' || lang === 'typescript') {
+                    // ES Modules import / require('./xxx.js') を同一階層からインライン解決
+                    const jsImports = Array.from(resolved.matchAll(/^[ \t]*import[ \t]+(?:[^'"]+from[ \t]+)?['"]\.\/([^'"]+)['"][ \t]*;?/gm));
+                    for (const m of jsImports) {
+                        const rel = m[1].endsWith('.js') ? m[1] : (m[1] + '.js');
+                        const base = rel.split('/').pop();
+                        const subJs = files[rel] || files[base];
+                        if (subJs) {
+                            const cleanedSub = subJs.replace(/^[ \t]*export[ \t]+default[ \t]+/gm, '').replace(/^[ \t]*export[ \t]+/gm, '');
+                            resolved = resolved.replace(m[0], `\n/* --- imported ${base} --- */\n${cleanedSub}\n`);
+                        }
+                    }
+                }
+
+                return { code: resolved, files, assets };
+            };
+
+            window._riviftTranspileCToLoopJS = function(rawCode) {
+                let src = rawCode.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/.*$/gm, m => (m[0] === '"' || m[0] === "'") ? m : '');
+                src = src.replace(/'(\\.|[^'\\])'/g, (_, ch) => {
+                    if (ch === '\\n') return '10';
+                    if (ch === '\\t') return '9';
+                    if (ch === '\\0') return '0';
+                    return String((ch[0] === '\\' ? ch.slice(1) : ch).charCodeAt(0) || 0);
+                });
+                src = src.replace(/\\\r?\n/g, ' ');
+                src = src.replace(/^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)[ \t]+([^\r\n]+)$/gm, 'function $1($2) { return ($3); }');
+                src = src.replace(/^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([^\r\n]+)$/gm, 'var $1 = ($2);');
+                src = src.replace(/^[ \t]*#[ \t]*[a-zA-Z]+.*$/gm, '');
+
+                // enum
+                src = src.replace(/\b(?:typedef\s+)?enum(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]*)\}(?:\s*[A-Za-z_][A-Za-z0-9_]*)?\s*;/g, (_, body) => {
+                    let v = 0, out = [];
+                    body.split(',').forEach(it => {
+                        const t = it.trim(); if (!t) return;
+                        const p = t.split('=');
+                        if (p[1] !== undefined) v = parseInt(p[1].trim(), 10) || 0;
+                        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(p[0].trim())) out.push(`var ${p[0].trim()} = ${v};`);
+                        v++;
+                    });
+                    return out.join(' ');
+                });
+
+                // typedef struct / struct
+                const customTypes = {};
+                const parseFields = (b) => {
+                    const f = [];
+                    b.split(';').forEach(st => {
+                        const cl = st.replace(/\[[^\]]*\]/g, '').trim();
+                        if (!cl) return;
+                        const toks = cl.split(/\s+/);
+                        const last = toks[toks.length - 1];
+                        if (last) last.split(',').forEach(vn => { const n = vn.replace(/\*/g, '').trim(); if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) f.push(n); });
+                    });
+                    return f;
+                };
+                src = src.replace(/typedef\s+struct(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*\{([^}]*)\}\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/g, (_, tag, body, tName) => {
+                    const flds = parseFields(body); customTypes[tName] = flds; if (tag) customTypes[tag] = flds; return '';
+                });
+                src = src.replace(/struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([^}]*)\}\s*;/g, (_, sName, body) => {
+                    customTypes[sName] = parseFields(body); return '';
+                });
+                customTypes['Vector2'] = ['x', 'y'];
+                customTypes['Vector3'] = ['x', 'y', 'z'];
+                customTypes['Rectangle'] = ['x', 'y', 'width', 'height'];
+                customTypes['Color'] = ['r', 'g', 'b', 'a'];
+                customTypes['Camera2D'] = ['offset', 'target', 'rotation', 'zoom'];
+
+                // Convert C compound literals like (Color){ 255, 0, 0, 255 } or (Vector2){ x, y } or (Rectangle){ x, y, w, h }
+                src = src.replace(/\(\s*Color\s*\)\s*\{\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)\s*(?:,\s*([^}]+))?\}/g, '(__rl_rgba($1,$2,$3,$4))');
+                src = src.replace(/\(\s*Vector2\s*\)\s*\{\s*([^,}]+)\s*,\s*([^}]+)\}/g, '({x:($1),y:($2)})');
+                src = src.replace(/\(\s*Rectangle\s*\)\s*\{\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^}]+)\}/g, '({x:($1),y:($2),width:($3),height:($4)})');
+
+                // Strip prototypes
+                src = src.replace(/\b(?:(?:static|inline|extern|const|unsigned|signed|long|short)\s+)*(?:int|void|float|double|char|long|short|bool|_Bool|size_t|Color|Vector2|Rectangle|Texture2D)(?:\s*\*+|\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*;/g, '');
+
+                // Arrays
+                src = src.replace(/\b(?:(?:static|const|unsigned|signed|long|short)\s+)*(?:int|float|double|char|long|short|bool|size_t|u8|u16|u32|[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]\s*\[\s*([^\]]+)\s*\]\s*=\s*\{([\s\S]*?)\}\s*;/g, (_, n, r, c, init) => `let ${n} = [${init.replace(/\{/g, '[').replace(/\}/g, ']')}];`);
+                src = src.replace(/\b(?:(?:static|const|unsigned|signed|long|short)\s+)*(?:int|float|double|char|long|short|bool|size_t|u8|u16|u32)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]\s*\[\s*([^\]]+)\s*\]\s*;/g, 'let $1 = Array.from({length: ($2)}, () => new Array($3).fill(0));');
+                src = src.replace(/\b(?:(?:static|const|unsigned|signed|long|short)\s+)*(?:int|float|double|char|long|short|bool|size_t|u8|u16|u32|[A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]*)\s*\]\s*=\s*\{([^}]*)\}/g, 'let $1 = [$3]');
+                src = src.replace(/\b(?:(?:static|const|unsigned|signed)\s+)*char\s*(?:\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*=\s*("[^"]*")/g, 'let $1 = $2');
+                src = src.replace(/\b(?:(?:static|const|unsigned|signed|long|short)\s+)*(?:int|float|double|char|long|short|bool|size_t|u8|u16|u32)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]\s*;/g, 'let $1 = new Array($2).fill(0);');
+
+                // Struct array declarations: Asteroid asteroids[MAX]
+                const tNames = Object.keys(customTypes);
+                if (tNames.length > 0) {
+                    const arrStructRe = new RegExp(`\\b(?:struct\\s+)?(${tNames.join('|')})\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\[\\s*([^\\]]+)\\s*\\]\\s*;`, 'g');
+                    src = src.replace(arrStructRe, (_, tn, vn, len) => {
+                        const flds = customTypes[tn] || [];
+                        const defObj = '{' + flds.map(f => `${f}:0`).join(',') + '}';
+                        return `let ${vn} = Array.from({length: (${len})}, () => (${defObj}));`;
+                    });
+                }
+
+                // Functions (make main async so frame loop can await requestAnimationFrame!)
+                src = src.replace(/\b(?:(?:static|inline|extern|const|unsigned|signed|long|short|struct)\s+)*(?:int|void|float|double|char|long|short|bool|_Bool|size_t|u8|u16|u32|u64|Color|Vector2|Rectangle|Texture2D)(?:\s*[\*&]+|\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{/g, (full, fnName, params) => {
+                    if (fnName === 'if' || fnName === 'for' || fnName === 'while' || fnName === 'switch') return full;
+                    const cl = params.trim();
+                    const pNames = (!cl || cl === 'void') ? [] : cl.split(',').map(p => {
+                        const s = p.split('=')[0].replace(/\[[^\]]*\]/g, '').replace(/[\*&]/g, ' ').trim();
+                        const pts = s.split(/\s+/);
+                        return pts[pts.length - 1];
+                    });
+                    return (fnName === 'main' ? 'async function main(' : `function ${fnName}(`) + pNames.join(', ') + ') {';
+                });
+
+                src = src.replace(/for\s*\(\s*(?:(?:unsigned|signed|long|short)\s+)*(?:int|size_t|long|short|char|auto)\s+/g, 'for (let ');
+
+                // Special GBA VRAM pointer declaration: volatile u16* vram = (u16*)0x06000000;
+                src = src.replace(/(?:volatile\s+)?(?:u16|unsigned\s+short|uint16_t)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\([^)]+\)\s*)?(?:0x0?6000000|MEM_VRAM)\s*;/g, 'let $1 = __gba_vram;');
+
+                // Remove C type casts & float suffixes (e.g. 3.5f -> 3.5)
+                src = src.replace(/\b(\d+\.\d+|\d+\.)[fF]\b/g, '$1');
+                src = src.replace(/\(\s*(?:(?:unsigned|signed|const|volatile|long|short)\s+)*(?:int|float|double|char|long|short|size_t|u8|u16|u32|u64)\s*\*?\s*\)\s*(?=[A-Za-z0-9_(\-+!"'])/g, '');
+
+                // Custom struct variable declarations
+                if (tNames.length > 0) {
+                    const ctInitPat = new RegExp(`(^|[\\n{};])[ \\t]*(?:const[ \\t]+)?(?:struct[ \\t]+)?(${tNames.join('|')})[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*=[ \\t]*\\{([^}]*)\\}[ \\t]*;`, 'gm');
+                    src = src.replace(ctInitPat, (_, pre, tName, vName, initVals) => {
+                        if (tName === 'Color') return `${pre}let ${vName} = __rl_rgba(${initVals});`;
+                        const flds = customTypes[tName] || [];
+                        const vals = initVals.split(',').map(s => s.trim());
+                        const pairs = flds.map((f, i) => `${f}: (${vals[i] !== undefined && vals[i] !== '' ? vals[i] : '0'})`);
+                        return `${pre}let ${vName} = {${pairs.join(', ')}};`;
+                    });
+                    const ctPat = new RegExp(`(^|[\\n{};])[ \\t]*(?:const[ \\t]+)?(?:struct[ \\t]+)?(${tNames.join('|')})[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*([=,;])`, 'gm');
+                    src = src.replace(ctPat, (_, pre, tName, vName, sep) => {
+                        if (sep === ';') {
+                            const flds = customTypes[tName] || [];
+                            return `${pre}let ${vName} = {${flds.map(f => `${f}: 0`).join(', ')}};`;
+                        }
+                        return `${pre}let ${vName} ${sep}`;
+                    });
+                }
+
+                // Standard variable declarations (supports multiple on one line like `int a = 1, b = 2;`)
+                src = src.replace(/(^|[\n{};])[ \t]*(?:(?:static|const|unsigned|signed|volatile|register|long|short|struct)[ \t]+)*(?:int|float|double|char|long|short|bool|_Bool|size_t|ssize_t|string|auto|u8|u16|u32|u64|int8_t|uint8_t|int16_t|uint16_t|int32_t|uint32_t|int64_t|uint64_t|FILE|Color|Vector2|Rectangle|Texture2D|Font|Sound|Music)(?:[ \t]*\*+|[ \t]+)+([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?=[=,;\[])/gm, '$1let $2');
+
+                // Transform Raylib / GBA loop & frame synchronization calls to async yield
+                src = src.replace(/while\s*\(\s*!\s*WindowShouldClose\s*\(\s*\)\s*\)\s*\{/g, 'while (!(await __rl_WindowShouldClose())) {');
+                src = src.replace(/\bEndDrawing\s*\(\s*\)\s*;/g, 'await __rl_EndDrawing();');
+                src = src.replace(/\bVBlankIntrWait\s*\(\s*\)\s*;/g, 'await __gba_VBlankIntrWait();');
+                src = src.replace(/while\s*\(\s*(?:1|true)\s*\)\s*\{/g, 'while (await __gba_LoopTick()) {');
+
+                return src;
+            };
+
+            window._riviftRunDynamicRaylib = async function(rawCode, canvas, options = {}) {
+                if (!canvas) return () => {};
+                const ctx = canvas.getContext('2d');
+                const dirs = options.dirs || ['/Documents'];
+                const openTabsList = options.openTabs || [];
+                const onLog = options.onLog || (() => {});
+                const { code: bundledCode, files, assets } = await window._riviftResolveCodeIncludes(rawCode, 'raylib', dirs, openTabsList);
+
+                // Preload image assets in the same directory so LoadTexture("sprite.png") works seamlessly
+                const loadedImages = {};
+                await Promise.all(Object.keys(assets).map(name => new Promise(res => {
+                    const img = new Image();
+                    img.onload = () => { loadedImages[name] = img; res(); };
+                    img.onerror = () => res();
+                    img.src = assets[name];
+                })));
+
+                canvas.width = 640;
+                canvas.height = 400;
+
+                let stopped = false;
+                let rafId = null;
+                const keysDown = {};
+                const keysPressed = {};
+                let mouseX = 0, mouseY = 0, mouseDown = [false, false, false], mousePressed = [false, false, false];
+
+                const mapKey = (e, isDown) => {
+                    const c = e.code, k = (e.key || '').toUpperCase();
+                    if (isDown && !keysDown[c]) keysPressed[c] = true;
+                    if (isDown && !keysDown[k]) keysPressed[k] = true;
+                    keysDown[c] = isDown;
+                    keysDown[k] = isDown;
+                };
+                const onKeyDown = (e) => mapKey(e, true);
+                const onKeyUp = (e) => mapKey(e, false);
+                const onMouseMove = (e) => {
+                    const r = canvas.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) {
+                        mouseX = Math.round((e.clientX - r.left) * (canvas.width / r.width));
+                        mouseY = Math.round((e.clientY - r.top) * (canvas.height / r.height));
+                    }
+                };
+                const onMouseDown = (e) => { mouseDown[e.button] = true; mousePressed[e.button] = true; };
+                const onMouseUp = (e) => { mouseDown[e.button] = false; };
+
+                window.addEventListener('keydown', onKeyDown);
+                window.addEventListener('keyup', onKeyUp);
+                canvas.addEventListener('mousemove', onMouseMove);
+                canvas.addEventListener('mousedown', onMouseDown);
+                window.addEventListener('mouseup', onMouseUp);
+
+                const cleanup = () => {
+                    stopped = true;
+                    if (rafId) cancelAnimationFrame(rafId);
+                    window.removeEventListener('keydown', onKeyDown);
+                    window.removeEventListener('keyup', onKeyUp);
+                    canvas.removeEventListener('mousemove', onMouseMove);
+                    canvas.removeEventListener('mousedown', onMouseDown);
+                    window.removeEventListener('mouseup', onMouseUp);
+                };
+
+                const COLORS = {
+                    LIGHTGRAY: '#c8c8c8', GRAY: '#828282', DARKGRAY: '#505050',
+                    YELLOW: '#fdf900', GOLD: '#ffcb00', ORANGE: '#ffa100',
+                    PINK: '#ff6dc2', RED: '#e62937', MAROON: '#be2137',
+                    GREEN: '#00e430', LIME: '#009e2f', DARKGREEN: '#00752c',
+                    SKYBLUE: '#66bfff', BLUE: '#0079f1', DARKBLUE: '#0052ac',
+                    PURPLE: '#c87aff', VIOLET: '#873cbe', DARKPURPLE: '#701f7e',
+                    BEIGE: '#d3b083', BROWN: '#7f6a4f', DARKBROWN: '#4c3f2f',
+                    WHITE: '#ffffff', BLACK: '#000000', BLANK: 'rgba(0,0,0,0)',
+                    MAGENTA: '#ff00ff', RAYWHITE: '#f5f5f5'
+                };
+
+                const resolveColor = (c, alpha = 1) => {
+                    if (!c) return '#ffffff';
+                    if (typeof c === 'string') return COLORS[c] || c;
+                    if (typeof c === 'object' && c.r !== undefined) {
+                        const a = (c.a !== undefined ? c.a / 255 : 1) * alpha;
+                        return `rgba(${c.r|0},${c.g|0},${c.b|0},${a})`;
+                    }
+                    return '#ffffff';
+                };
+
+                let frameYieldedThisTick = false;
+                const yieldFrame = () => new Promise((resolve, reject) => {
+                    if (stopped) return reject({ __rlStop: true });
+                    rafId = requestAnimationFrame(() => {
+                        if (stopped) return reject({ __rlStop: true });
+                        Object.keys(keysPressed).forEach(k => delete keysPressed[k]);
+                        mousePressed[0] = mousePressed[1] = mousePressed[2] = false;
+                        resolve(false);
+                    });
+                });
+
+                const checkKey = (dict, k) => {
+                    if (k === 'KEY_RIGHT' || k === 262) return !!(dict['ArrowRight'] || dict['KeyD']);
+                    if (k === 'KEY_LEFT' || k === 263) return !!(dict['ArrowLeft'] || dict['KeyA']);
+                    if (k === 'KEY_DOWN' || k === 264) return !!(dict['ArrowDown'] || dict['KeyS']);
+                    if (k === 'KEY_UP' || k === 265) return !!(dict['ArrowUp'] || dict['KeyW']);
+                    if (k === 'KEY_SPACE' || k === 32) return !!(dict['Space'] || dict[' ']);
+                    if (k === 'KEY_ENTER' || k === 257) return !!(dict['Enter']);
+                    if (typeof k === 'string' && k.startsWith('KEY_')) {
+                        const sub = k.slice(4);
+                        return !!(dict['Key' + sub] || dict[sub] || dict['Digit' + sub]);
+                    }
+                    if (typeof k === 'number') {
+                        const ch = String.fromCharCode(k).toUpperCase();
+                        return !!(dict['Key' + ch] || dict[ch]);
+                    }
+                    return !!dict[k];
+                };
+
+                let startTime = performance.now();
+                let fpsVal = 60, lastFrameTime = performance.now();
+
+                const api = {
+                    __rl_rgba: (r, g, b, a = 255) => ({ r: r|0, g: g|0, b: b|0, a: a === undefined ? 255 : (a|0) }),
+                    __rl_WindowShouldClose: async () => {
+                        if (stopped) throw { __rlStop: true };
+                        if (!frameYieldedThisTick) await yieldFrame();
+                        frameYieldedThisTick = false;
+                        return stopped;
+                    },
+                    __rl_EndDrawing: async () => {
+                        frameYieldedThisTick = true;
+                        const now = performance.now();
+                        const dt = now - lastFrameTime;
+                        if (dt > 0) fpsVal = Math.min(60, Math.round(1000 / dt));
+                        lastFrameTime = now;
+                        await yieldFrame();
+                    },
+                    InitWindow: (w, h, title) => {
+                        if (w > 0 && h > 0) { canvas.width = w; canvas.height = h; }
+                        if (options.onTitle && title) options.onTitle(title);
+                    },
+                    CloseWindow: () => {},
+                    SetTargetFPS: () => {},
+                    GetScreenWidth: () => canvas.width,
+                    GetScreenHeight: () => canvas.height,
+                    GetFrameTime: () => 1 / 60,
+                    GetTime: () => (performance.now() - startTime) / 1000,
+                    GetFPS: () => fpsVal,
+                    GetRandomValue: (min, max) => Math.floor(Math.random() * (max - min + 1)) + min,
+                    BeginDrawing: () => {},
+                    ClearBackground: (c) => { ctx.fillStyle = resolveColor(c); ctx.fillRect(0, 0, canvas.width, canvas.height); },
+                    DrawPixel: (x, y, c) => { ctx.fillStyle = resolveColor(c); ctx.fillRect(x, y, 1, 1); },
+                    DrawPixelV: (v, c) => { ctx.fillStyle = resolveColor(c); ctx.fillRect(v.x, v.y, 1, 1); },
+                    DrawLine: (x1, y1, x2, y2, c) => { ctx.strokeStyle = resolveColor(c); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+                    DrawLineEx: (p1, p2, thick, c) => { ctx.strokeStyle = resolveColor(c); ctx.lineWidth = thick || 1; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); },
+                    DrawCircle: (x, y, r, c) => { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, Math.PI * 2); ctx.fillStyle = resolveColor(c); ctx.fill(); },
+                    DrawCircleV: (v, r, c) => { ctx.beginPath(); ctx.arc(v.x, v.y, Math.max(0, r), 0, Math.PI * 2); ctx.fillStyle = resolveColor(c); ctx.fill(); },
+                    DrawCircleLines: (x, y, r, c) => { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, Math.PI * 2); ctx.strokeStyle = resolveColor(c); ctx.lineWidth = 1; ctx.stroke(); },
+                    DrawCircleGradient: (x, y, r, c1, c2) => {
+                        const g = ctx.createRadialGradient(x, y, 0, x, y, Math.max(1, r));
+                        g.addColorStop(0, resolveColor(c1)); g.addColorStop(1, resolveColor(c2));
+                        ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+                    },
+                    DrawRectangle: (x, y, w, h, c) => { ctx.fillStyle = resolveColor(c); ctx.fillRect(x, y, w, h); },
+                    DrawRectangleV: (pos, sz, c) => { ctx.fillStyle = resolveColor(c); ctx.fillRect(pos.x, pos.y, sz.x, sz.y); },
+                    DrawRectangleRec: (rec, c) => { if (rec) { ctx.fillStyle = resolveColor(c); ctx.fillRect(rec.x, rec.y, rec.width, rec.height); } },
+                    DrawRectangleLines: (x, y, w, h, c) => { ctx.strokeStyle = resolveColor(c); ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h); },
+                    DrawRectangleLinesEx: (rec, thick, c) => { if (rec) { ctx.strokeStyle = resolveColor(c); ctx.lineWidth = thick || 1; ctx.strokeRect(rec.x, rec.y, rec.width, rec.height); } },
+                    DrawRectangleRounded: (rec, roundness, segs, c) => {
+                        if (!rec) return;
+                        ctx.fillStyle = resolveColor(c);
+                        const rad = Math.min(rec.width, rec.height) * 0.5 * Math.min(1, Math.max(0, roundness || 0.2));
+                        ctx.beginPath();
+                        if (ctx.roundRect) ctx.roundRect(rec.x, rec.y, rec.width, rec.height, rad);
+                        else ctx.rect(rec.x, rec.y, rec.width, rec.height);
+                        ctx.fill();
+                    },
+                    DrawTriangle: (v1, v2, v3, c) => {
+                        ctx.fillStyle = resolveColor(c);
+                        ctx.beginPath(); ctx.moveTo(v1.x, v1.y); ctx.lineTo(v2.x, v2.y); ctx.lineTo(v3.x, v3.y); ctx.closePath(); ctx.fill();
+                    },
+                    DrawText: (txt, x, y, sz, c) => {
+                        const s = sz || 20;
+                        ctx.font = `bold ${s}px Consolas, monospace`;
+                        ctx.fillStyle = resolveColor(c);
+                        ctx.fillText(String(txt ?? ''), x, y + s * 0.85);
+                    },
+                    MeasureText: (txt, sz) => {
+                        ctx.font = `bold ${sz || 20}px Consolas, monospace`;
+                        return Math.ceil(ctx.measureText(String(txt ?? '')).width);
+                    },
+                    DrawFPS: (x, y) => {
+                        ctx.font = 'bold 16px Consolas, monospace';
+                        ctx.fillStyle = '#00e430';
+                        ctx.fillText(`${fpsVal} FPS`, x, y + 14);
+                    },
+                    TextFormat: (fmt, ...args) => {
+                        let i = 0;
+                        return String(fmt || '').replace(/%%|%([0-9.-]*[diuoxXfFeEgGcsp])/g, (m, sp) => {
+                            if (m === '%%') return '%';
+                            const v = args[i++];
+                            if (sp.endsWith('f')) {
+                                const dec = sp.includes('.') ? (parseInt(sp.split('.')[1], 10) || 0) : 2;
+                                return Number(v || 0).toFixed(dec);
+                            }
+                            if (sp.endsWith('d') || sp.endsWith('i') || sp.endsWith('u')) {
+                                const s = String(Math.trunc(Number(v) || 0));
+                                const pad = sp.match(/^0(\d+)/);
+                                return pad ? s.padStart(parseInt(pad[1], 10), '0') : s;
+                            }
+                            return String(v ?? '');
+                        });
+                    },
+                    Fade: (c, alpha) => resolveColor(c, alpha),
+                    ColorAlpha: (c, alpha) => resolveColor(c, alpha),
+                    IsKeyDown: (k) => checkKey(keysDown, k),
+                    IsKeyPressed: (k) => checkKey(keysPressed, k),
+                    IsKeyReleased: (k) => !checkKey(keysDown, k),
+                    GetMouseX: () => mouseX,
+                    GetMouseY: () => mouseY,
+                    GetMousePosition: () => ({ x: mouseX, y: mouseY }),
+                    IsMouseButtonDown: (b) => !!mouseDown[b || 0],
+                    IsMouseButtonPressed: (b) => !!mousePressed[b || 0],
+                    CheckCollisionRecs: (r1, r2) => r1 && r2 && (r1.x < r2.x + r2.width && r1.x + r1.width > r2.x && r1.y < r2.y + r2.height && r1.y + r1.height > r2.y),
+                    CheckCollisionCircles: (c1, r1, c2, r2) => Math.hypot((c1.x - c2.x), (c1.y - c2.y)) <= (r1 + r2),
+                    CheckCollisionPointRec: (p, r) => p && r && (p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height),
+                    CheckCollisionCircleRec: (c, rad, r) => {
+                        const cx = Math.max(r.x, Math.min(c.x, r.x + r.width));
+                        const cy = Math.max(r.y, Math.min(c.y, r.y + r.height));
+                        return Math.hypot(c.x - cx, c.y - cy) <= rad;
+                    },
+                    LoadTexture: (fileName) => {
+                        const base = String(fileName || '').split('/').pop();
+                        const img = loadedImages[base];
+                        return { id: 1, width: img ? img.width : 64, height: img ? img.height : 64, _img: img, _name: base };
+                    },
+                    UnloadTexture: () => {},
+                    DrawTexture: (tex, x, y, tint) => {
+                        if (tex && tex._img) ctx.drawImage(tex._img, x, y);
+                        else { ctx.fillStyle = resolveColor(tint || ' SKYBLUE'); ctx.fillRect(x, y, (tex && tex.width) || 32, (tex && tex.height) || 32); }
+                    },
+                    DrawTextureEx: (tex, pos, rot, scale, tint) => {
+                        const s = scale || 1;
+                        if (tex && tex._img) ctx.drawImage(tex._img, pos.x, pos.y, tex.width * s, tex.height * s);
+                    },
+                    LoadFileText: (fileName) => {
+                        const clean = String(fileName || '').replace(/^\.\//, '');
+                        const base = clean.split('/').pop();
+                        return files[clean] !== undefined ? files[clean] : (files[base] || '');
+                    },
+                    UnloadFileText: () => {},
+                    FileExists: (fileName) => {
+                        const clean = String(fileName || '').replace(/^\.\//, '');
+                        const base = clean.split('/').pop();
+                        return files[clean] !== undefined || files[base] !== undefined || loadedImages[base] !== undefined;
+                    },
+                    fopen: (fileName, mode) => {
+                        const clean = String(fileName || '').replace(/^\.\//, '');
+                        const base = clean.split('/').pop();
+                        if (String(mode || 'r').includes('w')) { files[clean] = ''; return { __isFile: true, name: clean, content: '', lines: [], idx: 0 }; }
+                        const txt = files[clean] !== undefined ? files[clean] : files[base];
+                        if (txt === undefined) return null;
+                        return { __isFile: true, name: clean, content: String(txt), lines: String(txt).split(/\r?\n/), idx: 0 };
+                    },
+                    fgets: (buf, sz, fp) => {
+                        if (!fp || fp.idx >= fp.lines.length) return null;
+                        const ln = fp.lines[fp.idx++];
+                        if (Array.isArray(buf)) { buf.length = 0; for (const ch of ln) buf.push(ch); }
+                        return ln;
+                    },
+                    fclose: () => 0,
+                    printf: (fmt, ...a) => { onLog(api.TextFormat(fmt, ...a)); return 0; }
+                };
+
+                try {
+                    const jsBody = window._riviftTranspileCToLoopJS(bundledCode);
+                    const colorConsts = Object.keys(COLORS).map(k => `const ${k} = "${k}";`).join(' ');
+                    const keyConsts = [
+                        'KEY_RIGHT="KEY_RIGHT"', 'KEY_LEFT="KEY_LEFT"', 'KEY_UP="KEY_UP"', 'KEY_DOWN="KEY_DOWN"',
+                        'KEY_SPACE="KEY_SPACE"', 'KEY_ENTER="KEY_ENTER"', 'KEY_ESCAPE="KEY_ESCAPE"',
+                        'KEY_W="KEY_W"', 'KEY_A="KEY_A"', 'KEY_S="KEY_S"', 'KEY_D="KEY_D"',
+                        'KEY_Z="KEY_Z"', 'KEY_X="KEY_X"', 'KEY_C="KEY_C"', 'KEY_R="KEY_R"', 'KEY_P="KEY_P"',
+                        'MOUSE_BUTTON_LEFT=0', 'MOUSE_BUTTON_RIGHT=1', 'MOUSE_LEFT_BUTTON=0', 'MOUSE_RIGHT_BUTTON=1'
+                    ].map(s => `const ${s};`).join(' ');
+                    const mathConsts = 'const sin=Math.sin,cos=Math.cos,tan=Math.tan,atan2=Math.atan2,sqrt=Math.sqrt,fabs=Math.abs,abs=Math.abs,floor=Math.floor,ceil=Math.ceil,round=Math.round,pow=Math.pow,fmax=Math.max,fmin=Math.min,rand=()=>Math.floor(Math.random()*32768),srand=()=>{},PI=Math.PI,DEG2RAD=Math.PI/180,RAD2DEG=180/Math.PI;';
+                    const apiDestruct = `const { ${Object.keys(api).join(', ')} } = __api;`;
+
+                    const runner = new Function('__api', `${colorConsts}\n${keyConsts}\n${mathConsts}\n${apiDestruct}\n${jsBody}\nreturn (typeof main === "function") ? main() : null;`);
+                    runner(api).catch(err => {
+                        if (err && err.__rlStop) return;
+                        console.warn('[Raylib Engine Runtime Error]', err);
+                        onLog(`[Raylib実行エラー] ${err.message || err}\n`);
+                    });
+                } catch (compileErr) {
+                    console.warn('[Raylib Transpile Error]', compileErr);
+                    onLog(`[Raylib構文エラー] ${compileErr.message || compileErr}\n`);
+                }
+
+                return cleanup;
+            };
+
+            window._riviftRunDynamicGba = async function(rawCode, canvas, options = {}) {
+                if (!canvas) return () => {};
+                const ctx = canvas.getContext('2d');
+                const dirs = options.dirs || ['/Documents'];
+                const openTabsList = options.openTabs || [];
+                const { code: bundledCode } = await window._riviftResolveCodeIncludes(rawCode, 'devkitpro', dirs, openTabsList);
+
+                canvas.width = 240;
+                canvas.height = 160;
+                const imgData = ctx.createImageData(240, 160);
+                const buf32 = new Uint32Array(imgData.data.buffer);
+                const vram = new Uint16Array(240 * 160);
+
+                const KEY_A = 1, KEY_B = 2, KEY_SELECT = 4, KEY_START = 8,
+                      KEY_RIGHT = 16, KEY_LEFT = 32, KEY_UP = 64, KEY_DOWN = 128,
+                      KEY_R = 256, KEY_L = 512;
+                let keysHeldVal = 0, prevKeysVal = 0, keysDownVal = 0;
+                let stopped = false, rafId = null;
+
+                const setKey = (k, isDown) => { if (isDown) keysHeldVal |= k; else keysHeldVal &= ~k; };
+                const onKeyDown = (e) => {
+                    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setKey(KEY_RIGHT, true);
+                    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') setKey(KEY_LEFT, true);
+                    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') setKey(KEY_UP, true);
+                    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') setKey(KEY_DOWN, true);
+                    if (e.key === 'z' || e.key === 'Z') setKey(KEY_A, true);
+                    if (e.key === 'x' || e.key === 'X') setKey(KEY_B, true);
+                    if (e.key === 'Enter') setKey(KEY_START, true);
+                    if (e.key === 'Shift') setKey(KEY_SELECT, true);
+                };
+                const onKeyUp = (e) => {
+                    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setKey(KEY_RIGHT, false);
+                    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') setKey(KEY_LEFT, false);
+                    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') setKey(KEY_UP, false);
+                    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') setKey(KEY_DOWN, false);
+                    if (e.key === 'z' || e.key === 'Z') setKey(KEY_A, false);
+                    if (e.key === 'x' || e.key === 'X') setKey(KEY_B, false);
+                    if (e.key === 'Enter') setKey(KEY_START, false);
+                    if (e.key === 'Shift') setKey(KEY_SELECT, false);
+                };
+                window.addEventListener('keydown', onKeyDown);
+                window.addEventListener('keyup', onKeyUp);
+
+                if (options.gbaPad) {
+                    options.gbaPad.querySelectorAll('.cr-gba-btn').forEach(btn => {
+                        const keyMap = { up: KEY_UP, down: KEY_DOWN, left: KEY_LEFT, right: KEY_RIGHT, a: KEY_A, b: KEY_B };
+                        const k = keyMap[btn.dataset.key];
+                        if (k) {
+                            btn.onmousedown = () => setKey(k, true);
+                            btn.onmouseup = () => setKey(k, false);
+                            btn.ontouchstart = (e) => { e.preventDefault(); setKey(k, true); };
+                            btn.ontouchend = (e) => { e.preventDefault(); setKey(k, false); };
+                        }
+                    });
+                }
+
+                const cleanup = () => {
+                    stopped = true;
+                    if (rafId) cancelAnimationFrame(rafId);
+                    window.removeEventListener('keydown', onKeyDown);
+                    window.removeEventListener('keyup', onKeyUp);
+                };
+
+                const flushVramAndWait = () => new Promise((resolve, reject) => {
+                    if (stopped) return reject({ __gbaStop: true });
+                    for (let i = 0; i < 240 * 160; i++) {
+                        const val = vram[i];
+                        const r = (val & 0x1F) << 3;
+                        const g = ((val >> 5) & 0x1F) << 3;
+                        const b = ((val >> 10) & 0x1F) << 3;
+                        buf32[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                    rafId = requestAnimationFrame(() => {
+                        if (stopped) return reject({ __gbaStop: true });
+                        resolve(true);
+                    });
+                });
+
+                let vblankCalledInIter = false;
+                const api = {
+                    __gba_vram: vram,
+                    __gba_VBlankIntrWait: async () => { vblankCalledInIter = true; await flushVramAndWait(); },
+                    __gba_LoopTick: async () => {
+                        if (stopped) throw { __gbaStop: true };
+                        if (!vblankCalledInIter) await flushVramAndWait();
+                        vblankCalledInIter = false;
+                        return !stopped;
+                    },
+                    scanKeys: () => { keysDownVal = keysHeldVal & ~prevKeysVal; prevKeysVal = keysHeldVal; },
+                    keysHeld: () => keysHeldVal,
+                    keysDown: () => keysDownVal,
+                    keysUp: () => (~keysHeldVal & prevKeysVal),
+                    irqInit: () => {},
+                    irqEnable: () => {},
+                    RGB5: (r, g, b) => ((r & 31) | ((g & 31) << 5) | ((b & 31) << 10)),
+                    RGB8: (r, g, b) => (((r >> 3) & 31) | (((g >> 3) & 31) << 5) | (((b >> 3) & 31) << 10)),
+                    m3_plot: (x, y, c) => { if (x >= 0 && x < 240 && y >= 0 && y < 160) vram[y * 240 + x] = c; }
+                };
+
+                try {
+                    const jsBody = window._riviftTranspileCToLoopJS(bundledCode);
+                    const consts = 'let REG_DISPCNT=0; const MODE_3=3, MODE_4=4, BG2_ENABLE=1024, BG2_ON=1024, IRQ_VBLANK=1, MEM_VRAM=0x06000000, KEY_A=1, KEY_B=2, KEY_SELECT=4, KEY_START=8, KEY_RIGHT=16, KEY_LEFT=32, KEY_UP=64, KEY_DOWN=128, KEY_R=256, KEY_L=512; const sin=Math.sin,cos=Math.cos,abs=Math.abs,sqrt=Math.sqrt,rand=()=>Math.floor(Math.random()*32768);';
+                    const apiDestruct = `const { ${Object.keys(api).join(', ')} } = __api;`;
+                    const runner = new Function('__api', `${consts}\n${apiDestruct}\n${jsBody}\nreturn (typeof main === "function") ? main() : null;`);
+                    runner(api).catch(err => { if (err && err.__gbaStop) return; console.warn('[GBA Runtime Error]', err); });
+                } catch (e) {
+                    console.warn('[GBA Transpile Error]', e);
+                }
+
+                return cleanup;
             };
     
 
@@ -37325,6 +38137,10 @@ self.addEventListener("message", function(ev) {
                                         wallpaperLoaderWorker.removeEventListener('message', _wpHandler);
                                     };
                                     wallpaperLoaderWorker.addEventListener('message', _wpHandler);
+                                    wallpaperLoaderWorker.postMessage({
+                                        wallpaperList: defaultWallpapers,
+                                        currentWallpaper: currentWallpaper
+                                    });
                                 } // end else (no cached preview)
 
                                 // 3. クリックイベントは、親要素でまとめて監視する（イベント委譲）
@@ -53550,7 +54366,11 @@ body.light-mode #rhe-root {
                                 filesToCreate = [
                                     {
                                         name: 'main.py',
-                                        content: '# Python 3 Data Analysis Sample\ndef analyze(numbers):\n    total = sum(numbers)\n    avg = total / len(numbers)\n    print(f"Count: {len(numbers)}, Sum: {total}, Avg: {avg:.2f}")\n    print("Squares:", [x * x for x in numbers])\n\nif __name__ == "__main__":\n    analyze([12, 24, 36, 48, 60])\n'
+                                        content: '# Python 3 Multi-File Project\nimport stats_helper\n\ndef main():\n    data = [12, 24, 36, 48, 60]\n    total = stats_helper.calc_sum(data)\n    avg = total / len(data)\n    print(f"Count: {len(data)}, Sum: {total}, Avg: {avg:.2f}")\n    print("Squares:", [x * x for x in data])\n\nif __name__ == "__main__":\n    main()\n'
+                                    },
+                                    {
+                                        name: 'stats_helper.py',
+                                        content: '# 同一階層のモジュール (main.py から自動読み込み)\ndef calc_sum(items):\n    s = 0\n    for x in items:\n        s = s + x\n    return s\n'
                                     }
                                 ];
                             } else if (tpl === 'raylib') {
@@ -53558,7 +54378,11 @@ body.light-mode #rhe-root {
                                 filesToCreate = [
                                     {
                                         name: 'game.c',
-                                        content: '#include "raylib.h"\n\nint main(void) {\n    InitWindow(640, 400, "Raylib 2D Studio");\n    SetTargetFPS(60);\n    int x = 320, y = 200;\n    while (!WindowShouldClose()) {\n        if (IsKeyDown(KEY_RIGHT)) x += 4;\n        if (IsKeyDown(KEY_LEFT))  x -= 4;\n        if (IsKeyDown(KEY_UP))    y -= 4;\n        if (IsKeyDown(KEY_DOWN))  y += 4;\n        BeginDrawing();\n        ClearBackground(RAYWHITE);\n        DrawCircle(x, y, 22, MAROON);\n        DrawText("Arrow Keys / WASD to Move", 20, 20, 18, DARKGRAY);\n        DrawFPS(540, 20);\n        EndDrawing();\n    }\n    CloseWindow();\n    return 0;\n}\n'
+                                        content: '#include "raylib.h"\n#include "game_config.h"\n\nint main(void) {\n    InitWindow(SCREEN_W, SCREEN_H, GAME_TITLE);\n    SetTargetFPS(60);\n    int x = SCREEN_W / 2;\n    int y = SCREEN_H / 2;\n    int vx = BALL_SPEED;\n    int vy = 3;\n    while (!WindowShouldClose()) {\n        if (IsKeyDown(KEY_RIGHT)) x += PLAYER_STEP;\n        if (IsKeyDown(KEY_LEFT))  x -= PLAYER_STEP;\n        if (IsKeyDown(KEY_UP))    y -= PLAYER_STEP;\n        if (IsKeyDown(KEY_DOWN))  y += PLAYER_STEP;\n        x += vx;\n        y += vy;\n        if (x > SCREEN_W - BALL_RADIUS || x < BALL_RADIUS) vx = -vx;\n        if (y > SCREEN_H - BALL_RADIUS || y < BALL_RADIUS) vy = -vy;\n        BeginDrawing();\n        ClearBackground(RAYWHITE);\n        DrawRectangleLines(16, 16, SCREEN_W - 32, SCREEN_H - 32, LIGHTGRAY);\n        DrawCircle(x, y, BALL_RADIUS, MAROON);\n        DrawText(GAME_TITLE, 28, 28, 18, DARKGRAY);\n        DrawFPS(SCREEN_W - 95, 28);\n        EndDrawing();\n    }\n    CloseWindow();\n    return 0;\n}\n'
+                                    },
+                                    {
+                                        name: 'game_config.h',
+                                        content: '#ifndef GAME_CONFIG_H\n#define GAME_CONFIG_H\n\n#define SCREEN_W 640\n#define SCREEN_H 400\n#define BALL_RADIUS 20\n#define BALL_SPEED 3\n#define PLAYER_STEP 5\n#define GAME_TITLE "Raylib 2D Studio (Multi-File)"\n\n#endif\n'
                                     }
                                 ];
                             } else if (tpl === 'devkitpro') {
@@ -53718,7 +54542,18 @@ body.light-mode #rhe-root {
 
                         // ── 統合コード実行・マルチファイルバンドル・スプリットプレビュー ──
                         let isWorkerRunning = false;
+                        let splitCleanupFn = null;
+                        function getActiveSearchDirs() {
+                            const activeTab = openTabs.find(t => t.id === activeTabId);
+                            const activePath = (activeTab && !activeTab.isUntitled ? activeTab.path : null) || currentFilePath;
+                            const fileDir = activePath ? (activePath.substring(0, activePath.lastIndexOf('/')) || '/') : null;
+                            return Array.from(new Set([fileDir, selectedTreeFolder, currentWorkspacePath, '/Documents/raylib-game', '/Documents/c-project', '/Documents/python-app', '/Documents/web-app', '/Documents'].filter(Boolean)));
+                        }
                         function stopIntegratedExecution(forceKill = false) {
+                            if (typeof splitCleanupFn === 'function') {
+                                try { splitCleanupFn(); } catch (_) {}
+                                splitCleanupFn = null;
+                            }
                             if (splitAnimFrame) {
                                 cancelAnimationFrame(splitAnimFrame);
                                 splitAnimFrame = null;
@@ -53861,73 +54696,13 @@ body.light-mode #rhe-root {
                             return bridge + '\n' + html;
                         }
 
-                        async function resolveCIncludesFromWorkspace(code) {
-                            if (!code || !code.includes('#include')) return code;
-                            let resolved = code;
-                            try {
-                                const incRegex = /#include\s+"([^"]+)"/g;
-                                const matches = Array.from(resolved.matchAll(incRegex));
-                                if (matches.length === 0) return resolved;
-
-                                if (!window._riviftHeaderCache) window._riviftHeaderCache = new Map();
-                                const activeTab = openTabs.find(t => t.id === activeTabId);
-                                const activePath = (activeTab && !activeTab.isUntitled ? activeTab.path : null) || currentFilePath;
-                                const fileDir = activePath ? (activePath.substring(0, activePath.lastIndexOf('/')) || '/') : null;
-
-                                for (const m of matches) {
-                                    const incName = m[1];
-                                    const baseName = incName.split('/').pop();
-                                    let hText = '';
-
-                                    // 1. 開いているタブから検索 (メモリ上なので0ms)
-                                    const openMatch = openTabs.find(t => t.name === baseName || (t.path && t.path.endsWith('/' + baseName)));
-                                    if (openMatch && openMatch.model) {
-                                        hText = openMatch.model.getValue();
-                                        window._riviftHeaderCache.set(baseName, hText);
-                                    }
-                                    // 2. メモリキャッシュから検索
-                                    if (!hText && window._riviftHeaderCache.has(baseName)) {
-                                        hText = window._riviftHeaderCache.get(baseName);
-                                    }
-                                    // 3. アクティブファイルの親フォルダ・ワークスペースフォルダから検索
-                                    if (!hText) {
-                                        const candidateDirs = Array.from(new Set([fileDir, currentWorkspacePath, '/Documents/c-project', '/Documents'].filter(Boolean)));
-                                        for (const dir of candidateDirs) {
-                                            const candidatePath = (dir === '/' ? '' : dir) + '/' + incName;
-                                            try {
-                                                const fd = await readFileWithWorker(candidatePath);
-                                                if (fd && fd.content) {
-                                                    hText = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
-                                                    if (hText) {
-                                                        window._riviftHeaderCache.set(baseName, hText);
-                                                        break;
-                                                    }
-                                                }
-                                            } catch (_) {}
-                                        }
-                                    }
-                                    // 4. VFS全体検索フォールバック
-                                    if (!hText && VFS && typeof VFS.search === 'function') {
-                                        try {
-                                            const found = await VFS.search(baseName);
-                                            const matchItem = (found || []).find(f => f.type !== 'folder' && f.name === baseName);
-                                            if (matchItem && matchItem.path) {
-                                                const fd = await readFileWithWorker(matchItem.path);
-                                                if (fd && fd.content) {
-                                                    hText = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
-                                                    if (hText) window._riviftHeaderCache.set(baseName, hText);
-                                                }
-                                            }
-                                        } catch (_) {}
-                                    }
-
-                                    if (hText) {
-                                        const targetRe = new RegExp(`#include\\s+"${incName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g');
-                                        resolved = resolved.replace(targetRe, `\n/* --- begin ${incName} --- */\n${hText}\n/* --- end ${incName} --- */\n`);
-                                    }
-                                }
-                            } catch (_) {}
-                            return resolved;
+                        async function resolveCIncludesFromWorkspace(code, lang = 'c') {
+                            if (!code) return code;
+                            if (window._riviftResolveCodeIncludes) {
+                                const res = await window._riviftResolveCodeIncludes(code, lang, getActiveSearchDirs(), openTabs);
+                                return res.code;
+                            }
+                            return code;
                         }
 
                         // 横のプレビューペインを実行中のプログラム言語に合わせて動的実行・描画
@@ -54051,52 +54826,23 @@ body.light-mode #rhe-root {
                             }
                         }
 
-                        function runSplitCanvasPreview(code, mode) {
+                        async function runSplitCanvasPreview(code, mode) {
                             stopIntegratedExecution();
                             const canvas = rheSt('rhe-split-canvas');
                             if (!canvas) return;
-                            const ctx = canvas.getContext('2d');
-                            if (mode === 'devkitpro') {
-                                canvas.width = 240;
-                                canvas.height = 160;
-                                let tick = 0;
-                                const imgData = ctx.createImageData(240, 160);
-                                const buf32 = new Uint32Array(imgData.data.buffer);
-                                const loop = () => {
-                                    tick++;
-                                    for (let y = 0; y < 160; y++) {
-                                        for (let x = 0; x < 240; x++) {
-                                            const c = ((x + tick) ^ (y + tick)) & 31;
-                                            const r = (c << 3), g = ((c >> 1) << 3), b = (c << 3);
-                                            buf32[y * 240 + x] = (255 << 24) | (b << 16) | (g << 8) | r;
-                                        }
-                                    }
-                                    ctx.putImageData(imgData, 0, 0);
-                                    splitAnimFrame = requestAnimationFrame(loop);
-                                };
-                                splitAnimFrame = requestAnimationFrame(loop);
-                            } else {
-                                canvas.width = 640;
-                                canvas.height = 400;
-                                let bx = 320, by = 200, sx = 4, sy = 3;
-                                const loop = () => {
-                                    bx += sx; by += sy;
-                                    if (bx > 620 || bx < 20) sx = -sx;
-                                    if (by > 380 || by < 20) sy = -sy;
-                                    ctx.fillStyle = '#f5f5f5';
-                                    ctx.fillRect(0, 0, 640, 400);
-                                    ctx.fillStyle = '#e2e8f0';
-                                    ctx.fillRect(20, 20, 600, 360);
-                                    ctx.beginPath();
-                                    ctx.arc(bx, by, 18, 0, Math.PI * 2);
-                                    ctx.fillStyle = '#be123c';
-                                    ctx.fill();
-                                    ctx.fillStyle = '#334155';
-                                    ctx.font = 'bold 16px monospace';
-                                    ctx.fillText('Raylib 2D Live Canvas (60 FPS)', 36, 48);
-                                    splitAnimFrame = requestAnimationFrame(loop);
-                                };
-                                splitAnimFrame = requestAnimationFrame(loop);
+                            const dirs = getActiveSearchDirs();
+                            if (mode === 'devkitpro' && window._riviftRunDynamicGba) {
+                                splitCleanupFn = await window._riviftRunDynamicGba(code, canvas, {
+                                    dirs,
+                                    openTabs,
+                                    onLog: (txt) => appendDockLog(txt)
+                                });
+                            } else if (window._riviftRunDynamicRaylib) {
+                                splitCleanupFn = await window._riviftRunDynamicRaylib(code, canvas, {
+                                    dirs,
+                                    openTabs,
+                                    onLog: (txt) => appendDockLog(txt)
+                                });
                             }
                         }
 
@@ -54107,9 +54853,11 @@ body.light-mode #rhe-root {
                             const activeTab = openTabs.find(t => t.id === activeTabId);
                             const fileName = activeTab ? activeTab.name : (lang === 'python' ? 'main.py' : 'main.c');
                             const badge = lang === 'python' ? 'Python 3' : (lang === 'cpp' ? 'C++' : 'C (GCC)');
-                            const bundledCode = (lang === 'c' || lang === 'cpp')
-                                ? await resolveCIncludesFromWorkspace(rawCode)
-                                : rawCode;
+                            const resolvedInfo = window._riviftResolveCodeIncludes
+                                ? await window._riviftResolveCodeIncludes(rawCode, lang, getActiveSearchDirs(), openTabs)
+                                : { code: rawCode, files: {} };
+                            const bundledCode = resolvedInfo.code;
+                            const vfsFiles = resolvedInfo.files || {};
 
                             const dockStatus = rheSt('rhe-dock-status');
                             if (dockStatus) dockStatus.textContent = `${badge} 実行中...`;
@@ -54167,7 +54915,8 @@ body.light-mode #rhe-root {
                                     type: lang === 'python' ? 'run-python' : 'run-c',
                                     runId: Date.now(),
                                     code: bundledCode,
-                                    stdin: stdinVal || ''
+                                    stdin: stdinVal || '',
+                                    files: vfsFiles
                                 });
                             } catch (err) {
                                 appendDockLog(`\n[Worker起動エラー] ${err.message}\n`, 'rhe-log-err');
@@ -54645,12 +55394,16 @@ body.light-mode #rhe-root {
                                 updateRunButtonState(currentLang);
                             }
                             const lang = currentLang || 'html';
+                            const dirs = getActiveSearchDirs();
                             if (lang === 'html') {
                                 code = await bundleHtmlWithWorkspace(code);
-                            } else if (lang === 'c' || lang === 'cpp') {
-                                code = await resolveCIncludesFromWorkspace(code);
+                            } else if (window._riviftResolveCodeIncludes) {
+                                const resolved = await window._riviftResolveCodeIncludes(code, lang, dirs, openTabs);
+                                code = resolved.code;
                             }
                             const fname = activeTab ? activeTab.name : 'index.html';
+                            const fpath = (activeTab && !activeTab.isUntitled ? activeTab.path : null) || currentFilePath || '';
+                            const baseDir = dirs[0] || '/Documents';
 
                             const existingRunnerKey = Array.from(openApps.keys()).find(k => k.startsWith('app-window-code-runner'));
                             const existingRunnerWin = existingRunnerKey ? openApps.get(existingRunnerKey)?.windowElement : null;
@@ -54664,12 +55417,14 @@ body.light-mode #rhe-root {
                                     ProcessManager.resume(existingRunnerKey);
                                 }
                                 bringWindowToFront(existingRunnerWin);
-                                existingRunnerWin._runCode(code, lang, fname);
+                                existingRunnerWin._runCode(code, lang, fname, baseDir, fpath);
                             } else {
                                 launchApp('code-runner', {
                                     code: code,
                                     lang: lang,
                                     fileName: fname,
+                                    baseDir: baseDir,
+                                    path: fpath,
                                     autoRun: true
                                 });
                             }
@@ -55359,11 +56114,22 @@ launcher: (params = {}) => {
     }
 
     function stopCurrentExecution() {
+        if (typeof runnerCanvasCleanup === 'function') {
+            try { runnerCanvasCleanup(); } catch (_) {}
+            runnerCanvasCleanup = null;
+        }
         if (animationFrameId) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
         }
         stopActiveWorker(true);
+    }
+    let runnerCanvasCleanup = null;
+    let currentBaseDir = params.baseDir || (params.path ? (params.path.substring(0, params.path.lastIndexOf('/')) || '/') : '/Documents');
+    let currentFilePath = params.path || '';
+    function getRunnerDirs() {
+        const dirFromPath = currentFilePath ? (currentFilePath.substring(0, currentFilePath.lastIndexOf('/')) || '/') : null;
+        return Array.from(new Set([dirFromPath, currentBaseDir, '/Documents/raylib-game', '/Documents/c-project', '/Documents/python-app', '/Documents/web-app', '/Documents'].filter(Boolean)));
     }
 
     // ── 言語自動判定 ──
@@ -55403,84 +56169,29 @@ launcher: (params = {}) => {
     // ══════════════════════════════════════════════════════════
     // 1. Raylib 2D エンジン (HTML5 Canvas 60FPS)
     // ══════════════════════════════════════════════════════════
-    function runRaylibGame(code) {
+    async function runRaylibGame(code) {
         stopCurrentExecution();
         switchView('canvas');
         gbaPad.classList.remove('active');
         canvasInfo.innerHTML = '<i class="fas fa-gamepad" style="margin-right:4px;"></i>Raylib 2D Engine (60 FPS)';
 
-        const ctx = canvasEl.getContext('2d');
-        canvasEl.width = 640;
-        canvasEl.height = 400;
-
-        const keysDownState = {};
-        const onKeyDown = function(e) { keysDownState[e.code] = true; keysDownState[e.key.toUpperCase()] = true; };
-        const onKeyUp = function(e) { keysDownState[e.code] = false; keysDownState[e.key.toUpperCase()] = false; };
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-
-        const COLORS = {
-            LIGHTGRAY: '#c8c8c8', GRAY: '#828282', DARKGRAY: '#505050',
-            YELLOW: '#fdf33f', GOLD: '#ffd700', ORANGE: '#ffa100',
-            PINK: '#ff6dae', RED: '#e62e2d', MAROON: '#be2137',
-            GREEN: '#00e430', LIME: '#00bc2c', DARKGREEN: '#00781e',
-            SKYBLUE: '#66bfff', BLUE: '#007ae6', DARKBLUE: '#0052ac',
-            PURPLE: '#c87aff', VIOLET: '#873cbe', DARKPURPLE: '#701f7d',
-            BEIGE: '#d3b089', BROWN: '#7f6a52', DARKBROWN: '#4c3f31',
-            WHITE: '#ffffff', BLACK: '#000000', BLANK: 'transparent',
-            MAGENTA: '#ff00ff', RAYWHITE: '#f5f5f5'
-        };
-
-        const rl = {
-            ClearBackground: function(c) { ctx.fillStyle = COLORS[c] || c || '#fff'; ctx.fillRect(0, 0, canvasEl.width, canvasEl.height); },
-            DrawRectangle: function(x, y, w, h, c) { ctx.fillStyle = COLORS[c] || c; ctx.fillRect(x, y, w, h); },
-            DrawCircle: function(x, y, r, c) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = COLORS[c] || c; ctx.fill(); },
-            DrawText: function(text, x, y, size, c) { ctx.font = 'bold ' + (size || 20) + 'px Consolas, monospace'; ctx.fillStyle = COLORS[c] || c; ctx.fillText(text, x, y + (size || 20)); },
-            DrawFPS: function(x, y) { ctx.font = '14px monospace'; ctx.fillStyle = '#00e430'; ctx.fillText('60 FPS', x, y + 14); },
-            IsKeyDown: function(k) {
-                if (k === 'KEY_RIGHT' || k === 'RIGHT') return !!(keysDownState['ArrowRight'] || keysDownState['KeyD'] || keysDownState['D']);
-                if (k === 'KEY_LEFT' || k === 'LEFT') return !!(keysDownState['ArrowLeft'] || keysDownState['KeyA'] || keysDownState['A']);
-                if (k === 'KEY_UP' || k === 'UP') return !!(keysDownState['ArrowUp'] || keysDownState['KeyW'] || keysDownState['W']);
-                if (k === 'KEY_DOWN' || k === 'DOWN') return !!(keysDownState['ArrowDown'] || keysDownState['KeyS'] || keysDownState['S']);
-                return !!keysDownState[k];
-            }
-        };
-
-        let ballX = 320, ballY = 200, spdX = 4, spdY = 3, radius = 16, bColor = 'MAROON';
-        const customTextMatch = code.match(/DrawText\s*\(\s*"([^"]+)"/);
-        const customBanner = customTextMatch ? customTextMatch[1] : 'Raylib in Rivift OS - Arrow Keys / WASD to Move!';
-
-        function gameLoop() {
-            if (rl.IsKeyDown('KEY_RIGHT')) ballX += 4;
-            if (rl.IsKeyDown('KEY_LEFT'))  ballX -= 4;
-            if (rl.IsKeyDown('KEY_UP'))    ballY -= 4;
-            if (rl.IsKeyDown('KEY_DOWN'))  ballY += 4;
-
-            ballX += spdX;
-            ballY += spdY;
-
-            if (ballX >= canvasEl.width - radius) { ballX = canvasEl.width - radius; spdX = -spdX; bColor = 'BLUE'; }
-            if (ballX <= radius) { ballX = radius; spdX = -spdX; bColor = 'RED'; }
-            if (ballY >= canvasEl.height - radius) { ballY = canvasEl.height - radius; spdY = -spdY; bColor = 'GREEN'; }
-            if (ballY <= radius) { ballY = radius; spdY = -spdY; bColor = 'ORANGE'; }
-
-            rl.ClearBackground('RAYWHITE');
-            rl.DrawRectangle(20, 20, canvasEl.width - 40, canvasEl.height - 40, 'LIGHTGRAY');
-            rl.DrawCircle(ballX, ballY, radius, bColor);
-            rl.DrawText(customBanner, 35, 35, 16, 'DARKGRAY');
-            rl.DrawFPS(canvasEl.width - 90, 35);
-
-            animationFrameId = requestAnimationFrame(gameLoop);
+        if (window._riviftRunDynamicRaylib) {
+            runnerCanvasCleanup = await window._riviftRunDynamicRaylib(code, canvasEl, {
+                dirs: getRunnerDirs(),
+                onTitle: function(title) {
+                    canvasInfo.innerHTML = '<i class="fas fa-gamepad" style="margin-right:4px;"></i>' + title + ' (60 FPS)';
+                },
+                onLog: function(txt) {
+                    termAppend(txt, 'out');
+                }
+            });
         }
 
-        animationFrameId = requestAnimationFrame(gameLoop);
         setStatus('Raylib 実行中 (60 FPS)', 'success');
         setProgress(100, 'Raylib 起動完了');
 
         canvasStopBtn.onclick = function() {
             stopCurrentExecution();
-            window.removeEventListener('keydown', onKeyDown);
-            window.removeEventListener('keyup', onKeyUp);
             setStatus('停止しました', 'normal');
         };
     }
@@ -55488,106 +56199,24 @@ launcher: (params = {}) => {
     // ══════════════════════════════════════════════════════════
     // 2. devkitPro (devkitARM / GBA) エンジン
     // ══════════════════════════════════════════════════════════
-    function runDevkitProGba(code) {
+    async function runDevkitProGba(code) {
         stopCurrentExecution();
         switchView('canvas');
         gbaPad.classList.add('active');
         canvasInfo.innerHTML = '<i class="fas fa-gamepad" style="margin-right:4px;"></i>devkitPro devkitARM - Game Boy Advance (240x160)';
 
-        canvasEl.width = 240;
-        canvasEl.height = 160;
-        const ctx = canvasEl.getContext('2d');
-        const imgData = ctx.createImageData(240, 160);
-        const buf32 = new Uint32Array(imgData.data.buffer);
-        const vram = new Uint16Array(240 * 160);
-
-        const KEY_A = 1, KEY_B = 2, KEY_SELECT = 4, KEY_START = 8,
-              KEY_RIGHT = 16, KEY_LEFT = 32, KEY_UP = 64, KEY_DOWN = 128;
-        let keysHeldVal = 0;
-
-        const setGbaKey = function(k, isDown) {
-            if (isDown) keysHeldVal |= k; else keysHeldVal &= ~k;
-        };
-
-        const onKeyDown = function(e) {
-            if (e.key === 'ArrowRight' || e.key === 'd') setGbaKey(KEY_RIGHT, true);
-            if (e.key === 'ArrowLeft' || e.key === 'a') setGbaKey(KEY_LEFT, true);
-            if (e.key === 'ArrowUp' || e.key === 'w') setGbaKey(KEY_UP, true);
-            if (e.key === 'ArrowDown' || e.key === 's') setGbaKey(KEY_DOWN, true);
-            if (e.key === 'z' || e.key === 'Z') setGbaKey(KEY_A, true);
-            if (e.key === 'x' || e.key === 'X') setGbaKey(KEY_B, true);
-            if (e.key === 'Enter') setGbaKey(KEY_START, true);
-            if (e.key === 'Shift') setGbaKey(KEY_SELECT, true);
-        };
-        const onKeyUp = function(e) {
-            if (e.key === 'ArrowRight' || e.key === 'd') setGbaKey(KEY_RIGHT, false);
-            if (e.key === 'ArrowLeft' || e.key === 'a') setGbaKey(KEY_LEFT, false);
-            if (e.key === 'ArrowUp' || e.key === 'w') setGbaKey(KEY_UP, false);
-            if (e.key === 'ArrowDown' || e.key === 's') setGbaKey(KEY_DOWN, false);
-            if (e.key === 'z' || e.key === 'Z') setGbaKey(KEY_A, false);
-            if (e.key === 'x' || e.key === 'X') setGbaKey(KEY_B, false);
-            if (e.key === 'Enter') setGbaKey(KEY_START, false);
-            if (e.key === 'Shift') setGbaKey(KEY_SELECT, false);
-        };
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-
-        gbaPad.querySelectorAll('.cr-gba-btn').forEach(function(btn) {
-            const keyMap = { up: KEY_UP, down: KEY_DOWN, left: KEY_LEFT, right: KEY_RIGHT, a: KEY_A, b: KEY_B };
-            const k = keyMap[btn.dataset.key];
-            if (k) {
-                btn.onmousedown = function() { setGbaKey(k, true); };
-                btn.onmouseup = function() { setGbaKey(k, false); };
-                btn.ontouchstart = function(e) { e.preventDefault(); setGbaKey(k, true); };
-                btn.ontouchend = function(e) { e.preventDefault(); setGbaKey(k, false); };
-            }
-        });
-
-        let px = 120, py = 80, tick = 0;
-
-        function gbaLoop() {
-            if (keysHeldVal & KEY_LEFT)  px--;
-            if (keysHeldVal & KEY_RIGHT) px++;
-            if (keysHeldVal & KEY_UP)    py--;
-            if (keysHeldVal & KEY_DOWN)  py++;
-
-            if (px < 6) px = 6; if (px > 233) px = 233;
-            if (py < 6) py = 6; if (py > 153) py = 153;
-
-            tick++;
-            for (let y = 0; y < 160; y += 4) {
-                for (let x = 0; x < 240; x += 4) {
-                    const c = ((x + tick) ^ (y + tick)) & 31;
-                    const r = (c >> 1) & 31, g = c & 31, b = (c >> 1) & 31;
-                    vram[y * 240 + x] = r | (g << 5) | (b << 10);
-                }
-            }
-
-            for (let d = -5; d <= 5; d++) {
-                vram[(py + d) * 240 + px] = 31 | (31 << 5);
-                vram[py * 240 + (px + d)] = 31 | (31 << 5);
-            }
-
-            for (let i = 0; i < 240 * 160; i++) {
-                const val = vram[i];
-                const r = (val & 0x1F) << 3;
-                const g = ((val >> 5) & 0x1F) << 3;
-                const b = ((val >> 10) & 0x1F) << 3;
-                buf32[i] = (255 << 24) | (b << 16) | (g << 8) | r;
-            }
-
-            ctx.putImageData(imgData, 0, 0);
-            animationFrameId = requestAnimationFrame(gbaLoop);
+        if (window._riviftRunDynamicGba) {
+            runnerCanvasCleanup = await window._riviftRunDynamicGba(code, canvasEl, {
+                dirs: getRunnerDirs(),
+                gbaPad: gbaPad
+            });
         }
 
-        animationFrameId = requestAnimationFrame(gbaLoop);
         setStatus('GBA エミュレータ稼働中', 'success');
         setProgress(100, 'devkitPro GBA 起動完了');
 
         canvasStopBtn.onclick = function() {
             stopCurrentExecution();
-            window.removeEventListener('keydown', onKeyDown);
-            window.removeEventListener('keyup', onKeyUp);
             setStatus('停止しました', 'normal');
         };
     }
@@ -55986,7 +56615,7 @@ launcher: (params = {}) => {
         });
     }
 
-    function executeCodeInWorker(code, lang, stdin) {
+    function executeCodeInWorker(code, lang, stdin, files) {
         termClear();
         stopActiveWorker(true);
         switchView('terminal');
@@ -56042,7 +56671,8 @@ launcher: (params = {}) => {
                     type: lang === 'c' ? 'run-c' : 'run-python',
                     runId: Date.now(),
                     code: code,
-                    stdin: stdin || currentStdinBuffer || ''
+                    stdin: stdin || currentStdinBuffer || '',
+                    files: files || {}
                 });
             } catch (e) {
                 termAppend('\n[初期化エラー] ' + e.message + '\n', 'err');
@@ -56057,22 +56687,24 @@ launcher: (params = {}) => {
     // ══════════════════════════════════════════════════════════
     // 5. 総合実行ディスパッチャー
     // ══════════════════════════════════════════════════════════
-    runnerWindow._runCode = function(c, l, f) { stopCurrentExecution(); runCode(c, l, f); };
-    async function runCode(code, explicitLang, fileName) {
+    runnerWindow._runCode = function(c, l, f, baseDir, filePath) { stopCurrentExecution(); runCode(c, l, f, baseDir, filePath); };
+    async function runCode(code, explicitLang, fileName, baseDir, filePath) {
         if (!code || !code.trim()) return;
         currentCode = code;
         currentFileName = fileName || currentFileName || 'code_snippet';
+        if (baseDir) currentBaseDir = baseDir;
+        if (filePath) currentFilePath = filePath;
         currentLang = explicitLang || autoDetectLanguage(currentFileName, currentCode);
 
         filenameEl.textContent = currentFileName;
-        filenameEl.title = currentFileName;
+        filenameEl.title = currentFilePath || currentFileName;
         updateBadge(currentLang);
         emptyView.style.display = 'none';
 
         if (currentLang === 'raylib') {
-            runRaylibGame(currentCode);
+            await runRaylibGame(currentCode);
         } else if (currentLang === 'devkitpro') {
-            runDevkitProGba(currentCode);
+            await runDevkitProGba(currentCode);
         } else if (currentLang === 'arm64') {
             runArmAssembly(currentCode, true);
         } else if (currentLang === 'arm32') {
@@ -56080,9 +56712,25 @@ launcher: (params = {}) => {
         } else if (currentLang === 'html' || currentLang === 'css') {
             switchView('html');
             setProgress(100, 'プレビュー表示中');
+            let htmlToRender = currentCode;
+            if (currentLang === 'html' && window._riviftCollectDirFiles) {
+                try {
+                    const { files } = await window._riviftCollectDirFiles(getRunnerDirs(), []);
+                    for (const [fn, txt] of Object.entries(files)) {
+                        if (!txt) continue;
+                        if (fn.endsWith('.css')) {
+                            const re = new RegExp(`<link[^>]+href=["'](?:\\./)?${fn.replace('.', '\\.')}["'][^>]*>`, 'i');
+                            if (re.test(htmlToRender)) htmlToRender = htmlToRender.replace(re, '<' + 'style>\n' + txt + '\n<' + '/style>');
+                        } else if (fn.endsWith('.js')) {
+                            const re = new RegExp('<' + `script[^>]+src=["'](?:\\./)?${fn.replace('.', '\\.')}["'][^>]*>\\s*<` + '/script>', 'i');
+                            if (re.test(htmlToRender)) htmlToRender = htmlToRender.replace(re, '<' + 'script>\n' + txt + '\n<' + '/script>');
+                        }
+                    }
+                } catch (_) {}
+            }
             htmlFrame.srcdoc = currentLang === 'css'
                 ? '<!DOCTYPE html><html><head><' + 'style>' + currentCode + '<' + '/style></head><body><h1>CSS Preview</h1></body></html>'
-                : currentCode;
+                : htmlToRender;
         } else if (currentLang === 'javascript' || currentLang === 'typescript') {
             termClear();
             switchView('terminal');
@@ -56090,12 +56738,17 @@ launcher: (params = {}) => {
             termAppend('[JavaScript Runtime] ' + currentFileName + ' を実行中...\n', 'sys');
             const t0 = performance.now();
             try {
+                let jsCodeToRun = currentCode;
+                if (window._riviftResolveCodeIncludes) {
+                    const resJs = await window._riviftResolveCodeIncludes(currentCode, currentLang, getRunnerDirs(), []);
+                    jsCodeToRun = resJs.code;
+                }
                 const customConsole = {
                     log: function() { termAppend(Array.from(arguments).map(function(x) { return typeof x === 'object' ? JSON.stringify(x, null, 2) : String(x); }).join(' ') + '\n', 'out'); },
                     warn: function() { termAppend('[WARN] ' + Array.from(arguments).join(' ') + '\n', 'sys'); },
                     error: function() { termAppend('[ERROR] ' + Array.from(arguments).join(' ') + '\n', 'err'); }
                 };
-                const fn = new Function('console', currentCode);
+                const fn = new Function('console', jsCodeToRun);
                 const ret = await fn(customConsole);
                 if (ret !== undefined) termAppend('=> ' + JSON.stringify(ret) + '\n', 'ok');
                 const dur = Math.round(performance.now() - t0);
@@ -56110,45 +56763,10 @@ launcher: (params = {}) => {
             isRunning = true;
             btnRun.disabled = true;
             try {
-                let codeToRun = currentCode;
-                if ((currentLang === 'c' || currentLang === 'cpp') && /#include\s+"([^"]+)"/.test(codeToRun)) {
-                    try {
-                        if (!window._riviftHeaderCache) window._riviftHeaderCache = new Map();
-                        const incMatches = Array.from(codeToRun.matchAll(/#include\s+"([^"]+)"/g));
-                        for (const m of incMatches) {
-                            const incName = m[1];
-                            const baseName = incName.split('/').pop();
-                            let hText = window._riviftHeaderCache.get(baseName) || '';
-                            if (!hText && typeof readFileWithWorker === 'function') {
-                                for (const dir of ['/Documents/c-project', '/Documents']) {
-                                    try {
-                                        const fd = await readFileWithWorker(dir + '/' + baseName);
-                                        if (fd && fd.content) {
-                                            hText = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
-                                            if (hText) { window._riviftHeaderCache.set(baseName, hText); break; }
-                                        }
-                                    } catch (_) {}
-                                }
-                            }
-                            if (!hText && typeof VFS !== 'undefined' && typeof VFS.search === 'function') {
-                                const found = await VFS.search(baseName);
-                                const matchItem = (found || []).find(f => f.type !== 'folder' && f.name === baseName);
-                                if (matchItem && matchItem.path) {
-                                    const fd = await readFileWithWorker(matchItem.path);
-                                    if (fd && fd.content) {
-                                        hText = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
-                                        if (hText) window._riviftHeaderCache.set(baseName, hText);
-                                    }
-                                }
-                            }
-                            if (hText) {
-                                const re = new RegExp(`#include\\s+"${incName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g');
-                                codeToRun = codeToRun.replace(re, `\n/* --- begin ${incName} --- */\n${hText}\n/* --- end ${incName} --- */\n`);
-                            }
-                        }
-                    } catch (_) {}
-                }
-                await executeCodeInWorker(codeToRun, currentLang === 'cpp' ? 'c' : currentLang, currentStdinBuffer);
+                const resolvedInfo = window._riviftResolveCodeIncludes
+                    ? await window._riviftResolveCodeIncludes(currentCode, currentLang, getRunnerDirs(), [])
+                    : { code: currentCode, files: {} };
+                await executeCodeInWorker(resolvedInfo.code, currentLang === 'cpp' ? 'c' : currentLang, currentStdinBuffer, resolvedInfo.files);
             } finally {
                 isRunning = false;
                 btnRun.disabled = false;
@@ -56183,7 +56801,8 @@ launcher: (params = {}) => {
             launchApp('html-editor', {
                 code: currentCode || '',
                 lang: currentLang || 'html',
-                fileName: currentFileName || ''
+                fileName: currentFileName || '',
+                path: currentFilePath || ''
             });
         };
     }
@@ -56208,11 +56827,11 @@ launcher: (params = {}) => {
             setStatus('読み込み中…', 'running');
             const fileData = await readFileWithWorker(path);
             if (fileData && fileData.content) {
-                const resp = await fetch(fileData.content);
-                const codeText = await resp.text();
+                const codeText = fileData.content.startsWith('data:') ? await (await fetch(fileData.content)).text() : fileData.content;
                 const fname = fileData.name || path.split('/').pop();
+                const parentDir = path.substring(0, path.lastIndexOf('/')) || '/';
                 const detected = autoDetectLanguage(fname, codeText);
-                runCode(codeText, detected, fname);
+                runCode(codeText, detected, fname, parentDir, path);
             }
         } catch (e) {
             createNotification('読み込みエラー', e.message, 'error');
@@ -56269,7 +56888,7 @@ launcher: (params = {}) => {
     });
 
     if (params.code) {
-        runCode(params.code, params.lang, params.fileName || 'snippet');
+        runCode(params.code, params.lang, params.fileName || 'snippet', params.baseDir, params.path);
     } else if (params.sample) {
         loadSample(params.sample);
     } else if (params.path) {
@@ -56277,10 +56896,10 @@ launcher: (params = {}) => {
             try {
                 const fd = await readFileWithWorker(params.path);
                 if (fd && fd.content) {
-                    const resp = await fetch(fd.content);
-                    const text = await resp.text();
+                    const text = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
                     const fname = fd.name || params.path.split('/').pop();
-                    runCode(text, autoDetectLanguage(fname, text), fname);
+                    const parentDir = params.path.substring(0, params.path.lastIndexOf('/')) || '/';
+                    runCode(text, autoDetectLanguage(fname, text), fname, parentDir, params.path);
                 }
             } catch (err) {
                 console.error('[code-runner] パス読み込み失敗:', err);
@@ -75609,8 +76228,8 @@ RiviftConnect.connectToServer = function () {
                 popup.className = 'app-window active';
                 popup.style.width = `${width}px`;
                 popup.style.height = `${height}px`;
-                popup.style.left = `calc(50% - ${width / 2}px)`;
-                popup.style.top = `calc(50% - ${height / 2}px)`;
+                popup.style.left = `${Math.max(0, Math.round((window.innerWidth - width) / 2))}px`;
+                popup.style.top = `${Math.max(0, Math.round((window.innerHeight - height) / 2))}px`;
                 popup.style.resize = 'none';
 
                 popup.innerHTML = `
@@ -75631,8 +76250,8 @@ RiviftConnect.connectToServer = function () {
                     let offsetX = e.clientX - popup.getBoundingClientRect().left;
                     let offsetY = e.clientY - popup.getBoundingClientRect().top;
                     document.onmousemove = (moveEvent) => {
-                        popup.style.left = `${moveEvent.clientX - offsetX}px`;
-                        popup.style.top = `${moveEvent.clientY - offsetY}px`;
+                        popup.style.left = `${Math.max(-(width - 80), Math.min(window.innerWidth - 80, moveEvent.clientX - offsetX))}px`;
+                        popup.style.top = `${Math.max(0, Math.min(window.innerHeight - 40, moveEvent.clientY - offsetY))}px`;
                     };
                     document.onmouseup = () => {
                         document.onmousemove = null;
