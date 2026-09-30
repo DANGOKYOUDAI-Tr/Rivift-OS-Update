@@ -84,11 +84,8 @@
             // 同一 window 内での再宣言エラー (SyntaxError) を防ぐためトップレベル const/let/class を var 化
             html = html.replace(/^(\s*)(?:const|let)\s+(openApps|activeWindow|ProcessManager|systemLanguage|RIVIFT_OS_VERSION|RIVIFT_UPDATE_CONFIG|RIVIFT_I18N|ProximityShare|NearbyShare)\b/gm, "$1var $2");
             html = html.replace(/^(\s*)class\s+(DesktopManager)\b/gm, "$1var $2 = class $2");
-            // リリースバージョンとコード内定数のズレを自動補正
-            if (cleanVer) {
-                html = html.replace(/(var|const|let)\s+RIVIFT_OS_VERSION\s*=\s*["'][^"']+["']/g, "$1 RIVIFT_OS_VERSION = '" + cleanVer + "'");
-                html = html.replace(/(var|const|let)\s+CURRENT_FILE_VERSION\s*=\s*["'][^"']+["']/g, "$1 CURRENT_FILE_VERSION = '" + cleanVer + "'");
-            }
+            // [FIX] ダウンロードしたHTML内の定数を偽装書き換えしない
+            // （古いコードに新しいバージョン番号だけを上書きして更新されたと誤認するバグを防止）
             // 旧バージョンのアップデート処理に含まれる blobUrl 遷移を通常の reload に置換
             html = html.replace(/window\.location\.replace\(blobUrl\)\s*;/g, "window.location.reload();");
             return html;
@@ -97,7 +94,7 @@
 
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
-        var CURRENT_FILE_VERSION = "5.2.9";
+        var CURRENT_FILE_VERSION = "5.3.0";
         function compareVer(a, b) {
             var clean = function(v) { return String(v || "").replace(/^v/i, "").trim(); };
             var pa = clean(a).split(".").map(function(n) { return parseInt(n, 10) || 0; });
@@ -16797,7 +16794,7 @@
             // ここに単一の定数として新設し、表示側・更新チェック側の両方から
             // この値だけを参照するようにする。
             // ==========================================================
-            var RIVIFT_OS_VERSION = '5.2.9';
+            var RIVIFT_OS_VERSION = '5.3.0';
 
             // GitHub Releases配信元の設定。
             // [FIX] owner/repoは未確定のため仮値。実運用時にここを書き換えるだけで
@@ -39472,6 +39469,13 @@ self.addEventListener("message", function(ev) {
                                         <i class="ti ti-clock"></i> <span id="update-scheduled-text"></span>
                                         <button id="update-cancel-scheduled" class="text-xs underline ml-2" style="opacity:.8;">キャンセル</button>
                                     </div>
+                                    <hr class="my-4" style="border-color: rgba(255,255,255,0.1);">
+                                    <div class="mt-3">
+                                        <p class="text-xs opacity-60 mb-2">アップデートキャッシュの初期化（問題発生時）:</p>
+                                        <button id="reset-update-cache-btn" class="text-xs px-3 py-1.5 rounded bg-red-600/30 hover:bg-red-600/50 text-red-200 border border-red-500/30 transition">
+                                            <i class="ti ti-trash"></i> 保存済みアップデートを消去して現行ファイルに戻す
+                                        </button>
+                                    </div>
                                 </div>
                             `;
                                 const checkForUpdatesButton = mainContent.querySelector('#check-for-updates');
@@ -39483,6 +39487,16 @@ self.addEventListener("message", function(ev) {
                                 const scheduledInfo = mainContent.querySelector('#update-scheduled-info');
                                 const scheduledText = mainContent.querySelector('#update-scheduled-text');
                                 const cancelScheduledBtn = mainContent.querySelector('#update-cancel-scheduled');
+                                const resetUpdateCacheBtn = mainContent.querySelector('#reset-update-cache-btn');
+                                if (resetUpdateCacheBtn) {
+                                    resetUpdateCacheBtn.addEventListener('click', async () => {
+                                        if (confirm('ブラウザに保存されたアップデート用キャッシュを削除し、最新の物理ファイルを直接読み込みますか？')) {
+                                            if (typeof riviftClearUpdateCache === 'function') {
+                                                await riviftClearUpdateCache();
+                                            }
+                                        }
+                                    });
+                                }
                                 let currentReleaseInfo = null;
 
                                 const renderScheduledInfo = () => {
@@ -77282,25 +77296,34 @@ RiviftConnect.connectToServer = function () {
             // 単一URLでも自動でjsDelivr形式への変換を試みる。
             function _riviftBuildDownloadCandidates(releaseInfo) {
                 const urls = [];
+                const ts = Date.now();
+                const { owner, repo } = (typeof RIVIFT_UPDATE_CONFIG !== 'undefined' ? RIVIFT_UPDATE_CONFIG : { owner: 'DANGOKYOUDAI-Tr', repo: 'Rivift-OS-Update' });
+                
+                // 1. 最新のコミットが含まれる main ブランチの生ファイルを最優先（キャッシュ回避クエリ付き）
+                urls.push(`https://raw.githubusercontent.com/${owner}/${repo}/main/index.html?t=${ts}`);
+
+                // 2. リリース情報に指定された downloadUrl (タグ指定rawなど)
                 const primary = releaseInfo?.downloadUrl;
                 if (Array.isArray(primary)) {
-                    urls.push(...primary.filter(Boolean));
+                    primary.filter(Boolean).forEach(u => urls.push(u.includes('?') ? `${u}&t=${ts}` : `${u}?t=${ts}`));
                 } else if (primary) {
-                    urls.push(primary);
+                    urls.push(primary.includes('?') ? `${primary}&t=${ts}` : `${primary}?t=${ts}`);
                 }
+
+                // 3. GitHub Releases 直接アセット (ブラウザCORS制限があるがフォールバックとして保持)
                 const assetUrl = releaseInfo?.assetDownloadUrl;
                 if (assetUrl && !urls.includes(assetUrl)) {
-                    const m = assetUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/);
-                    if (m) {
-                        const [, owner, repo, tag, file] = m;
-                        urls.push(`https://cdn.jsdelivr.net/gh/${owner}/${repo}@${tag}/${file}`);
-                    }
                     urls.push(assetUrl);
                 }
-                // 保険としてリポジトリのmainブランチ直接URLも候補に追加
-                const { owner, repo } = (typeof RIVIFT_UPDATE_CONFIG !== 'undefined' ? RIVIFT_UPDATE_CONFIG : { owner: 'DANGOKYOUDAI-Tr', repo: 'Rivift-OS-Update' });
-                const mainRaw = `https://raw.githubusercontent.com/${owner}/${repo}/main/index.html`;
-                if (!urls.includes(mainRaw)) urls.push(mainRaw);
+
+                // 4. jsdelivr CDN (恒久キャッシュのリスクがあるため最後のフォールバックに配置)
+                if (assetUrl) {
+                    const m = assetUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/(.+)$/);
+                    if (m) {
+                        const [, o, r, tag, file] = m;
+                        urls.push(`https://cdn.jsdelivr.net/gh/${o}/${r}@${tag}/${file}`);
+                    }
+                }
                 return urls;
             }
 
@@ -77320,24 +77343,49 @@ RiviftConnect.connectToServer = function () {
                     overlay.setText('最新版のシステムファイルをダウンロード中...');
                     overlay.setProgress(25);
                     const candidates = _riviftBuildDownloadCandidates(releaseInfo);
-                    let newContent = null;
+                    let bestContent = null;
+                    let bestVersion = null;
                     let lastError = null;
                     for (const url of candidates) {
                         try {
                             const res = await fetch(url);
                             if (!res.ok) { lastError = new Error(`ダウンロード失敗: ${res.status} (${url})`); continue; }
                             const text = await res.text();
-                            if (text && text.includes('<!DOCTYPE html>') && text.includes('Rivift OS')) {
-                                newContent = text;
+                            if (!text || !text.includes('<!DOCTYPE html>') || !text.includes('Rivift OS')) continue;
+
+                            // ダウンロードしたコード内の本当のバージョンを確認
+                            const vMatch = text.match(/(?:var|const|let)\s+RIVIFT_OS_VERSION\s*=\s*['"]([^'"]+)['"]/);
+                            const embeddedVer = vMatch ? vMatch[1] : null;
+
+                            // 目標リリースバージョン以上のファイルが見つかればそれを即座に採用
+                            if (embeddedVer && riviftCompareVersions(embeddedVer, releaseInfo.version) >= 0) {
+                                bestContent = text;
+                                bestVersion = embeddedVer;
                                 break;
+                            }
+
+                            // 現在のOSより新しいバージョンであれば候補として記録
+                            if (embeddedVer && riviftCompareVersions(embeddedVer, RIVIFT_OS_VERSION) > 0) {
+                                if (!bestContent || riviftCompareVersions(embeddedVer, bestVersion) > 0) {
+                                    bestContent = text;
+                                    bestVersion = embeddedVer;
+                                }
+                            } else if (!bestContent) {
+                                bestContent = text;
+                                bestVersion = embeddedVer;
                             }
                         } catch (e) {
                             lastError = e;
                         }
                     }
-                    if (newContent === null) {
+                    if (!bestContent) {
                         throw lastError || new Error('すべての配信元からのダウンロードに失敗しました');
                     }
+                    // [SECURITY/ACCURACY] ダウンロードしたコードが現在より新しくない場合は偽アップデートを防ぐため中止
+                    if (bestVersion && riviftCompareVersions(bestVersion, RIVIFT_OS_VERSION) <= 0) {
+                        throw new Error(`取得したコードのバージョン(ver.${bestVersion})が現在(ver.${RIVIFT_OS_VERSION})より新しくありません。GitHubリポジトリの該当ブランチまたはReleaseに最新のindex.htmlが正しくプッシュされているか確認してください。`);
+                    }
+                    let newContent = bestContent;
                     overlay.setProgress(60);
                     overlay.setText('ブラウザ内システム領域 (IndexedDB) に保存中...');
 
@@ -77498,6 +77546,37 @@ RiviftConnect.connectToServer = function () {
             window.riviftCancelScheduledUpdate = riviftCancelScheduledUpdate;
             window.riviftGetScheduledUpdate = riviftGetScheduledUpdate;
             window.riviftPerformUpdate = riviftPerformUpdate;
+            async function riviftClearUpdateCache() {
+                try {
+                    localStorage.removeItem('riviftUpdatedVersion');
+                    localStorage.removeItem('riviftLastUpdateSuccess');
+                    sessionStorage.removeItem('__rivift_boot_attempts__');
+                    if ('indexedDB' in window) {
+                        await new Promise((resolve) => {
+                            const req = indexedDB.open('rivift-system-store', 1);
+                            req.onsuccess = (e) => {
+                                const db = e.target.result;
+                                if (db.objectStoreNames.contains('system')) {
+                                    const tx = db.transaction('system', 'readwrite');
+                                    tx.objectStore('system').delete('updated-os');
+                                    tx.oncomplete = () => resolve();
+                                    tx.onerror = () => resolve();
+                                } else { resolve(); }
+                            };
+                            req.onerror = () => resolve();
+                        });
+                    }
+                    if ('caches' in window) {
+                        try { await caches.delete('rivift-runtime-cache'); } catch (_) {}
+                    }
+                    alert('アップデートキャッシュを消去しました。ページを再読み込みします。');
+                    window.location.reload();
+                } catch (e) {
+                    alert('キャッシュ削除中にエラーが発生しました: ' + e.message);
+                    window.location.reload();
+                }
+            }
+            window.riviftClearUpdateCache = riviftClearUpdateCache;
             window.riviftSimpleMarkdownToHtml = riviftSimpleMarkdownToHtml;
             window.riviftPromptSelectFileForUpdate = riviftPromptSelectFileForUpdate;
             window._riviftSupportsFileSystemAccess = _riviftSupportsFileSystemAccess;
