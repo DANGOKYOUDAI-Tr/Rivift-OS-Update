@@ -81,7 +81,16 @@
 
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
-        var CURRENT_FILE_VERSION = "5.4.0";
+        // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
+        var CURRENT_FILE_VERSION = "5.3.3";
+        // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
+        //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
+        function __riviftBootLog(msg) {
+            try {
+                if (window.RiviftLogger && typeof window.RiviftLogger.log === "function") window.RiviftLogger.log(msg);
+                else console.log(msg);
+            } catch (_) {}
+        }
         function compareVer(a, b) {
             var clean = function(v) { return String(v || "").replace(/^v/i, "").trim(); };
             var pa = clean(a).split(".").map(function(n) { return parseInt(n, 10) || 0; });
@@ -140,7 +149,7 @@
                                 var delTx = db.transaction("system", "readwrite");
                                 delTx.objectStore("system").delete("updated-os");
                                 localStorage.removeItem("riviftUpdatedVersion");
-                                RiviftLogger.log("[Rivift Bootloader] 現行ファイルが最新(ver." + CURRENT_FILE_VERSION + ")のため、旧アップデート領域を解放しました");
+                                __riviftBootLog("[Rivift Bootloader] 現行ファイルが最新(ver." + CURRENT_FILE_VERSION + ")のため、旧アップデート領域を解放しました");
                             } catch (_) {}
                             if (window.__RIVIFT_BOOTING_UPDATE__) {
                                 window.__RIVIFT_BOOTING_UPDATE__ = false;
@@ -171,7 +180,7 @@
                             window.__RIVIFT_BOOTED_FROM_STORAGE__ = true;
                             window.__RIVIFT_BOOTING_UPDATE__ = false;
                             var targetHtml = prepareUpdatedHtml(item.html, item.version);
-                            RiviftLogger.log("[Rivift Bootloader] 最新のOS (ver." + item.version + ") を同一URLでクリーンブートします");
+                            __riviftBootLog("[Rivift Bootloader] 最新のOS (ver." + item.version + ") を同一URLでクリーンブートします");
 
                             if ("caches" in window) {
                                 caches.open("rivift-runtime-cache").then(function(c) {
@@ -16770,7 +16779,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.2';
+            var RIVIFT_OS_VERSION = '5.3.3';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -61523,8 +61532,12 @@ body.light-mode #rhe-root {
                             const titleMatch = /<title[^>]*>([^<]+)<\/title>/i.exec(currentCode);
                             if (titleMatch && titleMatch[1].trim()) {
                                 detectedTitle = titleMatch[1].trim();
-                            } else if (activeTabPath) {
-                                detectedTitle = activeTabPath.split('/').pop().replace(/\.[^.]+$/, '');
+                            } else {
+                                const activeTab = openTabs.find(t => t.id === activeTabId);
+                                const activeTabName = activeTab && !activeTab.isUntitled
+                                    ? String(activeTab.path || activeTab.name || '').split('/').pop().replace(/\.[^.]+$/, '')
+                                    : '';
+                                if (activeTabName) detectedTitle = activeTabName;
                             }
                             let detectedCategory = 'tool';
                             let detectedEmoji = '';
