@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.3.3";
+        var CURRENT_FILE_VERSION = "5.3.4";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -425,6 +425,8 @@
 }
 
 body.light-mode {
+  --status-indicator-color-minimized: #111827;
+  --status-indicator-color-inactive: #4b5563;
   --m-card-bg: var(--m-card-bg-light);
   --m-card-border: var(--m-card-border-light);
   --m-separator: var(--m-separator-light);
@@ -2421,12 +2423,21 @@ body.dark-mode .taskbar-icon:hover {
 }
 
 .taskbar-icon.app-state-minimized .status-indicator {
-  background-color: var(--status-indicator-color-minimized, #8e8e93);
-  opacity: 0.85;
-  width: 4px;
-  height: 4px;
+  background-color: var(--status-indicator-color-minimized, #a1a1aa);
+  opacity: 0.95;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
   bottom: -2px;
+}
+body.light-mode .taskbar-icon.app-state-minimized .status-indicator {
+  background-color: var(--status-indicator-color-minimized, #111827) !important;
+  opacity: 1 !important;
+  width: 3px !important;
+  height: 3px !important;
+  border-radius: 50% !important;
+  bottom: -2px !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85) !important;
 }
 
 .taskbar-icon.app-state-other-desktop .status-indicator {
@@ -16779,7 +16790,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.3';
+            var RIVIFT_OS_VERSION = '5.3.4';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -19488,12 +19499,35 @@ const VFS = {
     },
 
     async searchWithContent(query) {
+        // [CrashGuard] 全ファイルの本文を一括でメモリに載せるとタブがクラッシュする(エラー5)ため、
+        //  ・画像/音声/動画/PDF/圧縮/フォントなどバイナリ系は本文を読まない
+        //  ・1ファイル512KB超は読まない / 読み込み総量6MB・400件まで
+        //  ・本文を読まないファイルもメタ情報(名前・パス)は返す(ファイル名検索は従来どおり動く)
         const metaResults = await this.search(query);
-        const withContent = [];
+        const MAX_FILE = 512 * 1024, MAX_TOTAL = 6 * 1024 * 1024, MAX_COUNT = 400;
+        const binType = /^(?:image|audio|video)\\/|pdf|zip|octet-stream|font/i;
+        const binExt = /\\.(?:png|jpe?g|gif|webp|bmp|ico|avif|heic|mp3|wav|ogg|flac|m4a|aac|mp4|webm|mov|mkv|avi|pdf|zip|7z|rar|gz|tar|ttf|otf|woff2?|exe|iso|bin|onnx|wasm)$/i;
+        let total = 0, loaded = 0;
+        const out = [];
         for (const meta of metaResults) {
-            withContent.push(await this._attachContent(meta));
+            const textual = !binType.test(String(meta.type || '')) && !binExt.test(String(meta.name || ''));
+            if (!textual || (meta.size || 0) > MAX_FILE || loaded >= MAX_COUNT || total >= MAX_TOTAL) {
+                out.push({ ...meta, content: null });
+                continue;
+            }
+            let rec;
+            try { rec = await this._attachContent(meta); } catch (_) { rec = { ...meta, content: null }; }
+            if (typeof rec.content === 'string') {
+                if (rec.content.length > MAX_FILE) rec = { ...rec, content: rec.content.slice(0, MAX_FILE) };
+                total += rec.content.length;
+                loaded++;
+            } else if (rec.content != null) {
+                rec = { ...rec, content: null }; // Blob/ArrayBuffer等は本文検索の対象外
+            }
+            out.push(rec);
+            if (loaded % 25 === 0) await new Promise(r => setTimeout(r, 0)); // UIを固めない
         }
-        return withContent;
+        return out;
     },
 
     async createFolder(parentPath, folderName, isSpecial = false) {
@@ -25856,22 +25890,13 @@ VFS.init();
             function getDockAnchorRect(appIdOrWinId) {
                 const baseAppId = appIdOrWinId ? String(appIdOrWinId).replace(/-\d+$/, '').replace(/^app-window-/, '') : '';
                 if (taskbar) {
-                    const prevTransition = taskbar.style.transition;
-                    taskbar.style.transition = 'none';
-                    taskbar.classList.remove('hidden');
-                    if (typeof isTaskbarCurrentlyVisible !== 'undefined') isTaskbarCurrentlyVisible = true;
-                    if (typeof hideTaskbarTimeoutId !== 'undefined' && hideTaskbarTimeoutId !== null) {
-                        clearTimeout(hideTaskbarTimeoutId);
-                        hideTaskbarTimeoutId = null;
-                    }
-                    void taskbar.offsetHeight; // 強制リフローでDock表示アニメ開始前の最終位置を確定
-
                     let targetIcon = null;
                     if (baseAppId) {
                         targetIcon = taskbar.querySelector(`.taskbar-icon[data-app="${baseAppId}"]`);
                     }
-
                     let anchorRect = null;
+                    const isHidden = taskbar.classList.contains('hidden');
+
                     if (targetIcon) {
                         const prevIconTransform = targetIcon.style.transform;
                         const prevIconTransition = targetIcon.style.transition;
@@ -25882,22 +25907,39 @@ VFS.init();
                         targetIcon.style.transition = prevIconTransition;
 
                         if (r.width > 0 && r.height > 0) {
-                            anchorRect = {
-                                left: r.left,
-                                top: r.top,
-                                width: r.width,
-                                height: r.height,
-                                right: r.right,
-                                bottom: r.bottom
-                            };
+                            if (isHidden) {
+                                const restingBottom = taskbar.classList.contains('full-width') ? 0 : 15;
+                                const restingTaskbarTop = window.innerHeight - restingBottom - (taskbar.offsetHeight || 48);
+                                const iconTop = restingTaskbarTop + (targetIcon.offsetTop || 0);
+                                anchorRect = {
+                                    left: r.left,
+                                    top: iconTop,
+                                    width: r.width,
+                                    height: r.height,
+                                    right: r.right,
+                                    bottom: iconTop + r.height
+                                };
+                            } else {
+                                anchorRect = {
+                                    left: r.left,
+                                    top: r.top,
+                                    width: r.width,
+                                    height: r.height,
+                                    right: r.right,
+                                    bottom: r.bottom
+                                };
+                            }
                         }
                     }
 
                     if (!anchorRect) {
-                        const tbRect = taskbar.getBoundingClientRect();
+                        const restingBottom = taskbar.classList.contains('full-width') ? 0 : 15;
+                        const restingTaskbarTop = isHidden
+                            ? (window.innerHeight - restingBottom - (taskbar.offsetHeight || 48))
+                            : taskbar.getBoundingClientRect().top;
                         const iconSize = 48;
-                        const cx = tbRect.left + tbRect.width / 2;
-                        const cy = tbRect.top + tbRect.height / 2;
+                        const cx = window.innerWidth / 2;
+                        const cy = restingTaskbarTop + (taskbar.offsetHeight || 48) / 2;
                         anchorRect = {
                             left: cx - iconSize / 2,
                             top: cy - iconSize / 2,
@@ -25908,7 +25950,6 @@ VFS.init();
                         };
                     }
 
-                    taskbar.style.transition = prevTransition;
                     return anchorRect;
                 }
 
@@ -27936,6 +27977,43 @@ VFS.init();
                 }
                 const RiviftVisionAI = window.RiviftVisionAI;
 
+
+                // ===== [CrashGuard] 画面キャプチャの安全ラッパー =====
+                // ・ライブポインタの演出要素(光の粒/リング)をキャプチャ対象から除外
+                // ・キャプチャ解像度に上限を設けてメモリ使用量を抑制
+                // ・同時実行を1つに制限し、タイムアウト付きで失敗してもページが落ちないようにする
+                window.__riviftLPExecuting = window.__riviftLPExecuting || 0;
+                window.__riviftLLMBusy = window.__riviftLLMBusy || 0;
+                window.__riviftSafeCapture = async function (opts) {
+                    if (typeof window.html2canvas !== 'function') throw new Error('html2canvas が読み込まれていません');
+                    if (window.__riviftCaptureRunning) {
+                        try { await window.__riviftCaptureRunning; } catch (_) { }
+                    }
+                    const o = Object.assign({}, opts);
+                    const w = Math.max(1, o.width || window.innerWidth);
+                    const h = Math.max(1, o.height || window.innerHeight);
+                    const MAX_PIXELS = 1800000; // 約180万ピクセルまで
+                    let scale = Math.min(o.scale || 1, 1.25);
+                    if (w * h * scale * scale > MAX_PIXELS) scale = Math.max(0.4, Math.sqrt(MAX_PIXELS / (w * h)));
+                    o.scale = scale;
+                    o.logging = false;
+                    const userIgnore = typeof o.ignoreElements === 'function' ? o.ignoreElements : null;
+                    o.ignoreElements = el => {
+                        try {
+                            if (el && el.classList && (el.classList.contains('rivift-lp-particle') || el.classList.contains('rivift-lp-contract-ring') || el.classList.contains('html2canvas-container'))) return true;
+                            if (el && el.nodeName === 'VIDEO') return true; // 描画不可で重い要素は除外
+                        } catch (_) { }
+                        return userIgnore ? userIgnore(el) : false;
+                    };
+                    let timer;
+                    const job = Promise.race([
+                        window.html2canvas(document.body, o),
+                        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('画面キャプチャがタイムアウトしました')), 15000); })
+                    ]);
+                    window.__riviftCaptureRunning = job.catch(() => { }).then(() => { window.__riviftCaptureRunning = null; });
+                    try { return await job; } finally { clearTimeout(timer); }
+                };
+
                 const RiviftLivePointer = {
                     isActive: false,
                     currentPos: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
@@ -28466,38 +28544,38 @@ VFS.init();
 
                         const seen = new Set();
                         const scored = [];
+                        const bodyHits = new Map(); // 本文一致は名前一致より低い順位で扱う
                         
                         // ── 【機能 1: 中身・文脈・記憶のあいまいさ検索】 ──
                         // ファイル名だけでなく、テキスト・メモ・JSON等の中身(content)を全文走査
                         try {
-                            if (window.VFS && q && q.length >= 2) {
+                            if (window.VFS && q && q.length >= 2 && !cat) {
                                 let allWithContent = [];
                                 if (typeof window.VFS.searchWithContent === 'function') {
-                                    allWithContent = (await window.VFS.searchWithContent('')) || [];
+                                    const _c = window.__riviftContentSearchCache;
+                                    if (_c && Date.now() - _c.t < 15000) {
+                                        allWithContent = _c.data;
+                                    } else {
+                                        allWithContent = (await window.VFS.searchWithContent('')) || [];
+                                        window.__riviftContentSearchCache = { t: Date.now(), data: allWithContent };
+                                    }
                                 } else if (typeof window.VFS.search === 'function') {
                                     allWithContent = (await window.VFS.search('')) || [];
                                 }
                                 for (const fc of allWithContent) {
                                     if (!fc || !fc.path || seen.has(fc.path) || fc.type === 'folder') continue;
-                                    let bodyText = String(fc.content || '');
-                                    if (!bodyText && typeof window.VFS.readFile === 'function') {
-                                        try {
-                                            const fullF = await window.VFS.readFile(fc.path);
-                                            if (fullF && fullF.content) bodyText = String(fullF.content);
-                                        } catch (_) {}
-                                    }
+                                    // [CrashGuard] 本文が空/対象外のファイルをreadFileで読み直さない(巨大ファイルでメモリ不足になるため)
+                                    let bodyText = typeof fc.content === 'string' ? fc.content.slice(0, 200000) : '';
                                     if (bodyText) {
                                         const bodyLower = norm(bodyText);
                                         if (bodyLower.includes(q)) {
-                                            seen.add(fc.path);
                                             fc._matchReason = '本文内に「' + query + '」を含むため一致';
-                                            scored.push({ item: fc, score: 85 });
+                                            bodyHits.set(fc.path, { item: fc, score: 25 });
                                         } else {
                                             const words = q.split(/\s+/).filter(w => w.length >= 2);
                                             if (words.length >= 2 && words.every(w => bodyLower.includes(w))) {
-                                                seen.add(fc.path);
                                                 fc._matchReason = '本文内にキーワードを含むため一致';
-                                                scored.push({ item: fc, score: 80 });
+                                                bodyHits.set(fc.path, { item: fc, score: 22 });
                                             }
                                         }
                                     }
@@ -28524,11 +28602,17 @@ VFS.init();
                                 else if (name.includes(q)) score = 50;
                                 else if (base.length >= 2 && q.includes(base)) score = 30;
                             }
+                            const bh = bodyHits.get(it.path);
+                            if (bh) {
+                                bodyHits.delete(it.path);
+                                if (bh.score > score) { it._matchReason = bh.item._matchReason; score = bh.score; }
+                            }
                             if (score > 0) {
                                 if (!wantFolder && isFolder) score -= 5;
                                 scored.push({ item: it, score });
                             }
                         }
+                        for (const [, bh] of bodyHits) { if (!opts.includeTrash && /^\/Trash(?:\/|$)/.test(bh.item.path || '')) continue; if (wantFolder) continue; scored.push(bh); }
                         if (!scored.length && q && !wantFolder) {
                             try {
                                 if (window.VFS?.searchWithContent) {
@@ -28610,7 +28694,7 @@ VFS.init();
                                     if (typeof VFS !== 'undefined' && VFS.search) all = (await VFS.search('')) || [];
                                 } catch (_) {}
                                 const filesOnly = all.filter(f => f.type !== 'folder' && !/^\/Trash/.test(f.path));
-                                if (filesOnly.length > 0) {
+                                if (false) { // [FileFix] 検索語が無いときに先頭のファイルを勝手に開かない
                                     const chosen = filesOnly[0];
                                     if (typeof launchAppByFileType === 'function') {
                                         launchAppByFileType(chosen);
@@ -29520,7 +29604,7 @@ VFS.init();
                             a.play().catch(() => { });
                         } catch (_) { }
                     },
-                    showAssistRecognizing(bounds) {
+                    showAssistRecognizing(bounds, root, mode) {
                         try {
                             if (!bounds) return null;
                             const bx = bounds.x ?? bounds.left ?? 0;
@@ -29530,7 +29614,7 @@ VFS.init();
                             if (bw < 4 || bh < 4) return null;
                             const fx = document.createElement('div');
                             fx.setAttribute('aria-hidden', 'true');
-                            fx.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:2147483645;pointer-events:none;box-sizing:border-box;border:2px solid rgba(96,165,250,.95);border-radius:8px;background:rgba(59,130,246,0.06);box-shadow:0 0 24px 3px rgba(59,130,246,.45),inset 0 0 18px rgba(59,130,246,.15);`;
+                            fx.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:${this.getAssistFxZ(bounds, root, mode)};pointer-events:none;box-sizing:border-box;border:2px solid rgba(96,165,250,.95);border-radius:8px;background:rgba(59,130,246,0.06);box-shadow:0 0 24px 3px rgba(59,130,246,.45),inset 0 0 18px rgba(59,130,246,.15);`;
                             document.body.appendChild(fx);
                             fx.animate([{ opacity: 0, transform: 'scale(1.01)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 160, easing: 'ease-out', fill: 'forwards' });
                             return fx;
@@ -29551,7 +29635,7 @@ VFS.init();
                             if (bw < 4 || bh < 4) return;
                             const fx = document.createElement('div');
                             fx.setAttribute('aria-hidden', 'true');
-                            fx.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:2147483645;pointer-events:none;box-sizing:border-box;border:2px solid rgba(50,223,178,.95);border-radius:8px;box-shadow:0 0 32px 6px rgba(50,223,178,.55),inset 0 0 28px rgba(50,223,178,.18);opacity:0;`;
+                            fx.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:${this.getAssistFxZ(bounds, null, this.assistMode)};pointer-events:none;box-sizing:border-box;border:2px solid rgba(50,223,178,.95);border-radius:8px;box-shadow:0 0 32px 6px rgba(50,223,178,.55),inset 0 0 28px rgba(50,223,178,.18);opacity:0;`;
                             document.body.appendChild(fx);
                             const a = fx.animate([{ opacity: 0, transform: 'scale(.99)' }, { opacity: 1, transform: 'scale(1)', offset: .3 }, { opacity: 0, transform: 'scale(1.015)' }], { duration: 720, easing: 'ease-out' });
                             a.onfinish = () => fx.remove();
@@ -29573,7 +29657,7 @@ VFS.init();
                         const bh = bounds.height ?? (bounds.bottom - bounds.top) ?? 0;
                         const frame = document.createElement('div');
                         frame.setAttribute('aria-hidden', 'true');
-                        frame.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:2147483645;overflow:hidden;pointer-events:none;box-sizing:border-box;border:1.5px solid rgba(107,176,255,.9);border-radius:6px;box-shadow:0 0 0 1px rgba(15,35,62,.8),inset 0 0 18px rgba(66,133,244,.14);`;
+                        frame.style.cssText = `position:fixed;left:${bx}px;top:${by}px;width:${bw}px;height:${bh}px;z-index:${this.getAssistFxZ({ x: bx, y: by, width: bw, height: bh }, null, this.assistMode)};overflow:hidden;pointer-events:none;box-sizing:border-box;border:1.5px solid rgba(107,176,255,.9);border-radius:6px;box-shadow:0 0 0 1px rgba(15,35,62,.8),inset 0 0 18px rgba(66,133,244,.14);`;
                         const scanLine = document.createElement('div');
                         scanLine.className = 'rivift-scan-line';
                         scanLine.style.position = 'absolute';
@@ -29634,7 +29718,7 @@ VFS.init();
                         if (!bounds || !bounds.width || !bounds.height) return;
                         const frame = document.createElement('div');
                         frame.setAttribute('aria-hidden', 'true');
-                        frame.style.cssText = `position:fixed;left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px;z-index:2147483645;overflow:hidden;pointer-events:none;border:1.5px solid rgba(56,189,248,0);border-radius:6px;transition:border-color 0.12s ease,box-shadow 0.12s ease,opacity 0.22s ease;`;
+                        frame.style.cssText = `position:fixed;left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px;z-index:${this.getAssistFxZ(bounds, null, this.assistMode)};overflow:hidden;pointer-events:none;border:1.5px solid rgba(56,189,248,0);border-radius:6px;transition:border-color 0.12s ease,box-shadow 0.12s ease,opacity 0.22s ease;`;
                         document.body.appendChild(frame);
                         requestAnimationFrame(() => {
                             frame.style.borderColor = 'rgba(56,189,248,0.85)';
@@ -29647,12 +29731,12 @@ VFS.init();
                     startAssistObserver(targetRoot, bounds) {
                         this.stopAssistObserver();
                         this.assistObserver = new MutationObserver(mutations => {
-                            if (!this.assistBounds || this.assistIsRescanning) return;
+                            if (!this.assistBounds || this.assistIsRescanning || window.__riviftLPExecuting > 0) return;
                             let shouldRescan = false;
                             const isOwnNode = n => n.nodeType === 1 && (
                                 (n.getAttribute('aria-hidden') === 'true' && n.style && n.style.position === 'fixed')
                                 || n.nodeName === 'IFRAME'
-                                || (n.matches && n.matches('#ai-screen-assist-highlight, #rivift-screen-assist-target-highlight, .rivift-element-highlight, .rivift-scan-line, .html2canvas-container')));
+                                || (n.matches && n.matches('#ai-screen-assist-highlight, #rivift-screen-assist-target-highlight, .rivift-element-highlight, .rivift-scan-line, .html2canvas-container, .rivift-lp-particle, .rivift-lp-contract-ring')));
                             for (const m of mutations) {
                                 if (m.type === 'childList') {
                                     const changed = [...m.addedNodes, ...m.removedNodes];
@@ -29668,7 +29752,7 @@ VFS.init();
                                     }
                                     continue;
                                 }
-                                if (target.closest('#ai-win-screen-assist-row, #rivift-screen-assist-overlay, #rivift-ai-live-pointer, #rivift-screen-assist-target-highlight, #ai-screen-assist-highlight, #ai-selection-panel, .rivift-scan-line, .rivift-element-highlight')) {
+                                if (target.closest('#ai-win-screen-assist-row, #rivift-screen-assist-overlay, #rivift-ai-live-pointer, #rivift-screen-assist-target-highlight, #ai-screen-assist-highlight, #ai-selection-panel, .rivift-scan-line, .rivift-element-highlight, .rivift-lp-particle, .rivift-lp-contract-ring, .html2canvas-container')) {
                                     continue;
                                 }
                                 if ((this.assistTarget && this.assistTarget.contains(target)) || this.assistMode === 'screen') {
@@ -29749,8 +29833,95 @@ VFS.init();
                         }
                     },
                     getAssistLayerZ(el) {
+                        // [LayerFix] 対象要素が属するウィンドウのz-indexを基準にする(呼び出し側で+1して枠をその直上に置く)。
+                        // これにより、手前にある別ウィンドウより枠が前に出てしまう「常に最前面」を防ぐ。
+                        try {
+                            if (el && el.closest) {
+                                const win = el.closest('.app-window');
+                                if (win) {
+                                    const wz = parseInt(getComputedStyle(win).zIndex, 10);
+                                    if (!isNaN(wz)) return wz;
+                                }
+                                // ウィンドウ外の要素(デスクトップ/タスクバー等)は、祖先のz-indexを基準にする
+                                let best = NaN;
+                                for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+                                    const z = parseInt(getComputedStyle(n).zIndex, 10);
+                                    if (!isNaN(z)) best = isNaN(best) ? z : Math.max(best, z);
+                                }
+                                if (!isNaN(best)) return best;
+                            }
+                        } catch (_) { }
                         const topZ = typeof _getFrontmostZIndex === 'function' ? _getFrontmostZIndex() : 3000;
                         return Math.max(3195, topZ + 5);
+                    },
+                    getAssistFxZ(bounds, root, mode) {
+                        // 認識中/完了/スキャン/再スキャンの演出枠を、対象ウィンドウと同じ階層(直上)に置く
+                        const TOP = 2147483645;
+                        try {
+                            const m = mode || this.assistMode;
+                            if (m === 'screen') return TOP;
+                            let w = null;
+                            const asWin = n => (n && n.closest) ? (n.closest('.app-window') || (n.classList?.contains('app-window') ? n : null)) : null;
+                            if (root) w = asWin(root);
+                            if (!w && m === 'window' && this.assistTarget) w = asWin(this.assistTarget);
+                            if (!w && bounds) {
+                                const bx = bounds.x ?? bounds.left ?? 0, by = bounds.y ?? bounds.top ?? 0;
+                                const bw = bounds.width ?? 0, bh = bounds.height ?? 0;
+                                const stack = document.elementsFromPoint(bx + bw / 2, by + bh / 2);
+                                for (const n of stack) {
+                                    if (n.closest('#rivift-screen-assist-overlay, #ai-screen-assist-highlight, #ai-selection-panel, #rivift-ai-live-pointer, #rivift-screen-assist-target-highlight')) continue;
+                                    if (n.getAttribute && n.getAttribute('aria-hidden') === 'true' && n.style && n.style.position === 'fixed') continue; // 演出枠自身
+                                    const ww = n.closest('.app-window');
+                                    if (ww) { w = ww; break; }
+                                }
+                            }
+                            if (w && w.isConnected) return this.getAssistLayerZ(w) + 1;
+                        } catch (_) { }
+                        return TOP;
+                    },
+                    getAssistFrameZ() {
+                        // 選択中の画面の枠のz-index: ウィンドウ選択=そのウィンドウ、範囲選択=範囲の中心にあるウィンドウの直上
+                        try {
+                            let anchor = null;
+                            if (this.assistMode === 'window') anchor = this.assistTarget;
+                            else if (this.assistMode === 'area' && this.assistBounds) {
+                                if (!this.assistAnchorWin || !this.assistAnchorWin.isConnected) {
+                                    const b = this.assistBounds;
+                                    const stack = document.elementsFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+                                    for (const n of stack) {
+                                        if (n.closest('#rivift-screen-assist-overlay, #ai-screen-assist-highlight, #ai-selection-panel, #rivift-ai-live-pointer, #rivift-screen-assist-target-highlight')) continue;
+                                        const w = n.closest('.app-window');
+                                        if (w) { this.assistAnchorWin = w; break; }
+                                    }
+                                }
+                                anchor = this.assistAnchorWin;
+                            }
+                            if (anchor && anchor.isConnected) return this.getAssistLayerZ(anchor) + 1;
+                        } catch (_) { }
+                        return this.getAssistLayerZ();
+                    },
+                    _isOccluded(el) {
+                        // 対象の中心付近が、別のウィンドウ等で覆われているか(全サンプル点が覆われていれば true)
+                        try {
+                            const r = el.getBoundingClientRect();
+                            if (!r.width || !r.height) return false;
+                            const win = el.closest ? el.closest('.app-window') : null;
+                            const px = [0.5, 0.2, 0.8], py = [0.5, 0.2, 0.8];
+                            let sampled = 0, covered = 0;
+                            for (const fy of py) for (const fx of px) {
+                                const x = r.left + r.width * fx, y = r.top + r.height * fy;
+                                if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) continue;
+                                const stack = document.elementsFromPoint(x, y).filter(n =>
+                                    !(n.id && /^(?:rivift-ai-live-pointer|rivift-screen-assist-target-highlight|ai-screen-assist-highlight|rivift-screen-assist-overlay)$/.test(n.id))
+                                    && !(n.classList && (n.classList.contains('rivift-lp-particle') || n.classList.contains('rivift-lp-contract-ring') || n.classList.contains('rivift-element-highlight') || n.classList.contains('rivift-scan-line'))));
+                                const top = stack[0];
+                                if (!top) continue;
+                                sampled++;
+                                const ok = el.contains(top) || top.contains(el) || (win && win.contains(top));
+                                if (!ok) covered++;
+                            }
+                            return sampled > 0 && covered === sampled;
+                        } catch (_) { return false; }
                     },
                     _isClippedOut(el) {
                         const r = el.getBoundingClientRect();
@@ -29768,7 +29939,7 @@ VFS.init();
                         if (now - (this._assistLayerAt || 0) < 120) return;
                         this._assistLayerAt = now;
                         const frame = document.getElementById('ai-screen-assist-highlight');
-                        if (frame) frame.style.zIndex = String(this.getAssistLayerZ());
+                        if (frame) frame.style.zIndex = String(this.getAssistFrameZ());
                         const hl = this.assistTargetHighlightEl;
                         const foundEl = this.assistFoundTarget?.el;
                         if (hl && foundEl?.isConnected) {
@@ -29778,7 +29949,7 @@ VFS.init();
                             hl.style.top = `${rect.top - 5}px`;
                             hl.style.width = `${Math.max(12, rect.width + 10)}px`;
                             hl.style.height = `${Math.max(12, rect.height + 10)}px`;
-                            hl.style.display = (this.isInAssistScope(foundEl) && !this._isClippedOut(foundEl)) ? '' : 'none';
+                            hl.style.display = (this.isInAssistScope(foundEl) && !this._isClippedOut(foundEl) && !this._isOccluded(foundEl)) ? '' : 'none';
                         }
                     },
 
@@ -29942,8 +30113,8 @@ VFS.init();
                     async refreshAssistSnapshot(bounds) {
                         try {
                             if (typeof window.html2canvas !== 'function' || !bounds.width || !bounds.height) return;
-                            const scale = Math.min(1.5, window.devicePixelRatio || 1);
-                            const canvas = await window.html2canvas(document.body, {
+                            const scale = Math.min(1, window.devicePixelRatio || 1);
+                            const canvas = await window.__riviftSafeCapture({
                                 x: bounds.x + window.scrollX,
                                 y: bounds.y + window.scrollY,
                                 width: bounds.width,
@@ -29996,9 +30167,18 @@ VFS.init();
                     },
                     scheduleAssistRescan() {
                         if (this.assistRescanDebounceTimer) clearTimeout(this.assistRescanDebounceTimer);
+                        if (!this.assistBounds) return;
+                        const sinceLast = Date.now() - (this.assistLastRescanAt || 0);
+                        const wait = Math.max(400, 2500 - sinceLast);
                         this.assistRescanDebounceTimer = setTimeout(() => {
+                            this.assistRescanDebounceTimer = null;
+                            if (!this.assistBounds) return;
+                            if (document.hidden || window.__riviftLLMBusy > 0 || window.__riviftLPExecuting > 0) {
+                                this.scheduleAssistRescan(); // 重い処理が終わるまで待つ
+                                return;
+                            }
                             this.reScanAssistTargets().catch(err => console.warn('[AssistRescan] Error:', err));
-                        }, 400);
+                        }, wait);
                     },
                     collectAssistWindows() {
                         return Array.from(document.querySelectorAll('.app-window'))
@@ -30031,6 +30211,7 @@ VFS.init();
                     async reScanAssistTargets(force = false) {
                         if (!this.assistBounds) return;
                         if (this.assistIsRescanning) { this.assistRescanPending = true; return; }
+                        this.assistLastRescanAt = Date.now();
                         this.assistIsRescanning = true;
                         try {
                             const liveBounds = this.computeAssistBounds();
@@ -30057,7 +30238,7 @@ VFS.init();
 
                             await this.animateAssistRescan(this.assistBounds);
 
-                            if (force || Date.now() - (this.assistLastSnapshotAt || 0) > 1500) {
+                            if ((force || Date.now() - (this.assistLastSnapshotAt || 0) > 4000) && !(window.__riviftLLMBusy > 0)) {
                                 this.assistLastSnapshotAt = Date.now();
                                 await this.refreshAssistSnapshot(this.assistBounds);
                             }
@@ -30096,6 +30277,7 @@ VFS.init();
                     },
                     clearAssistSelection() {
                         this.stopAssistObserver();
+                        this.assistAnchorWin = null;
                         this.assistRescanPending = false;
                         this.clearAssistTargetHighlight();
                         this.assistBounds = null;
@@ -30339,14 +30521,14 @@ VFS.init();
                                     };
                                     if (bounds.width < 12 || bounds.height < 12) throw new Error('選択範囲が小さすぎます。もう一度選択してください。');
                                     this.playAssistSound('assist_start');
-                                    recogFx = this.showAssistRecognizing(bounds);
+                                    recogFx = this.showAssistRecognizing(bounds, target.mode === 'window' ? target.root : null, target.mode);
 
                                     await new Promise(requestAnimationFrame);
                                     if (typeof window.html2canvas !== 'function') {
                                         throw new Error('画面画像の取得機能を読み込めませんでした。ネットワーク接続とページの再読み込みを確認してください。');
                                     }
                                     const scale = Math.min(1.5, window.devicePixelRatio || 1);
-                                    const canvas = await window.html2canvas(document.body, {
+                                    const canvas = await window.__riviftSafeCapture({
                                         x: left + window.scrollX,
                                         y: top + window.scrollY,
                                         width: bounds.width,
@@ -31528,6 +31710,33 @@ VFS.init();
                 };
 
                 window.RiviftLivePointer = RiviftLivePointer;
+
+                // ===== [CrashGuard] 実行系メソッドのラップ =====
+                (function () {
+                    const LP = RiviftLivePointer;
+                    const wrapMethod = (name, onError) => {
+                        const orig = LP[name];
+                        if (typeof orig !== 'function' || orig.__guarded) return;
+                        const guarded = async function (...args) {
+                            window.__riviftLPExecuting = (window.__riviftLPExecuting || 0) + 1;
+                            try {
+                                return await orig.apply(LP, args);
+                            } catch (err) {
+                                console.warn('[LivePointer] ' + name + ' failed:', err);
+                                return onError(err);
+                            } finally {
+                                window.__riviftLPExecuting = Math.max(0, (window.__riviftLPExecuting || 1) - 1);
+                                if (window.__riviftLPExecuting === 0 && LP.assistBounds) {
+                                    setTimeout(() => { try { LP.scheduleAssistRescan(); } catch (_) { } }, 700);
+                                }
+                            }
+                        };
+                        guarded.__guarded = true;
+                        LP[name] = guarded;
+                    };
+                    wrapMethod('executeNaturalInstruction', err => `操作に失敗しました: ${err && err.message ? err.message : err}`);
+                    wrapMethod('executeScreenAssistInstruction', err => ({ handled: true, message: `操作に失敗しました: ${err && err.message ? err.message : err}` }));
+                })();
             })();
 
             const _OS_APP_ALIASES = {
@@ -31601,7 +31810,7 @@ VFS.init();
                 }
                 const fileSearchMatch = orig.match(/(?:(.+?)(?:という)?ファイル(?:を)?(?:探して|検索|探索|見つけて)|(?:ファイル|ファイル一覧|フォルダ)(?:を)?(?:探して|検索|探索|見せて)|(?:探索|検索)[:：]\s*(.+))/);
                 if (fileSearchMatch) {
-                    const query = (fileSearchMatch[1] || fileSearchMatch[2] || '').trim().replace(/^(?:の|について)/, '');
+                    const query = (fileSearchMatch[1] || fileSearchMatch[2] || '').trim().replace(/^(?:の|について)/, '').replace(/(?:の|という|について)$/, '').trim();
                     actions.push({ type: 'searchFiles', query: query || '' });
                 }
 
@@ -32086,14 +32295,20 @@ VFS.init();
                         results.push('[SEARCH] ファイルシステムを探索中...');
                         try {
                             let foundFiles = [];
-                            if (typeof VFS !== 'undefined' && VFS.searchWithContent) {
-                                foundFiles = await VFS.searchWithContent(query) || [];
-                            } else if (typeof VFS !== 'undefined' && VFS.search) {
-                                foundFiles = await VFS.search(query) || [];
-                            } else {
-                                foundFiles = await _listFilesRecursive(pid, '/') || [];
+                            let _scoredUsed = false;
+                            if (query && window.RiviftLivePointer?.searchVfsEntries) {
+                                try { foundFiles = (await window.RiviftLivePointer.searchVfsEntries(query)) || []; _scoredUsed = true; } catch (_) { foundFiles = []; }
                             }
-                            if (query) {
+                            if (!_scoredUsed) {
+                                if (typeof VFS !== 'undefined' && VFS.searchWithContent) {
+                                    foundFiles = await VFS.searchWithContent(query) || [];
+                                } else if (typeof VFS !== 'undefined' && VFS.search) {
+                                    foundFiles = await VFS.search(query) || [];
+                                } else {
+                                    foundFiles = await _listFilesRecursive(pid, '/') || [];
+                                }
+                            }
+                            if (query && !_scoredUsed) {
                                 foundFiles = foundFiles.filter(f => (f.name || '').toLowerCase().includes(query) || (f.path || '').toLowerCase().includes(query));
                             }
                             if (foundFiles.length === 0) {
@@ -32115,7 +32330,17 @@ VFS.init();
                             if (typeof VFS !== 'undefined' && VFS.searchWithContent) all = await VFS.searchWithContent('') || [];
                             else if (typeof VFS !== 'undefined' && VFS.search) all = await VFS.search('') || [];
                             
-                            const match = all.find(f => (f.name || '').toLowerCase() === targetName || (f.name || '').toLowerCase().includes(targetName) || (f.path || '').toLowerCase().includes(targetName));
+                            let match = null;
+                            if (targetName) {
+                                try {
+                                    const scoredHits = await window.RiviftLivePointer?.searchVfsEntries?.(a.name);
+                                    if (scoredHits && scoredHits.length) match = scoredHits[0];
+                                } catch (_) { }
+                                if (!match) {
+                                    match = all.find(f => (f.name || '').toLowerCase() === targetName)
+                                        || all.find(f => (f.name || '').toLowerCase().includes(targetName)) || null;
+                                }
+                            }
                             if (match) {
                                 if (typeof launchAppByFileType === 'function') {
                                     launchAppByFileType(match);
@@ -32897,6 +33122,16 @@ self.onmessage = async (e) => {
                                 const worker = state.worker;
                                 const reqId = 'chat_' + (++state._reqCounter);
 
+                                // [CrashGuard] 生成中は重い画面スキャンを止めるためのフラグ
+                                let __busyReleased = false;
+                                window.__riviftLLMBusy = (window.__riviftLLMBusy || 0) + 1;
+                                const __releaseBusy = () => {
+                                    if (__busyReleased) return;
+                                    __busyReleased = true;
+                                    window.__riviftLLMBusy = Math.max(0, (window.__riviftLLMBusy || 1) - 1);
+                                };
+                                setTimeout(__releaseBusy, 180000); // 念のため3分で自動解除
+
                                 if (opts.stream) {
                                     const pending = [];
                                     let waiter = null;
@@ -32904,8 +33139,8 @@ self.onmessage = async (e) => {
                                     let streamErr = null;
 
                                     state.pendingReqs[reqId] = {
-                                        resolve: () => { closed = true; if (waiter) { waiter(); waiter = null; } },
-                                        reject: (err) => { streamErr = err; closed = true; if (waiter) { waiter(); waiter = null; } },
+                                        resolve: () => { __releaseBusy(); closed = true; if (waiter) { waiter(); waiter = null; } },
+                                        reject: (err) => { __releaseBusy(); streamErr = err; closed = true; if (waiter) { waiter(); waiter = null; } },
                                         onDelta: (delta) => {
                                             if (delta) pending.push(delta);
                                             if (waiter) { waiter(); waiter = null; }
@@ -32938,8 +33173,8 @@ self.onmessage = async (e) => {
 
                                 return new Promise((resolve, reject) => {
                                     state.pendingReqs[reqId] = {
-                                        resolve,
-                                        reject,
+                                        resolve: (v) => { __releaseBusy(); resolve(v); },
+                                        reject: (e) => { __releaseBusy(); reject(e); },
                                         onDelta: opts._onDelta || null,
                                     };
                                     worker.postMessage({
@@ -35386,7 +35621,7 @@ ${assistantAnswer.slice(0, 1000)}
                     const isScreenScanRequest = /(?:画面(?:を)?(?:認識|スキャン|解析|チェック)|スキャン(?:して|を実行)|画面認識)/.test(msg || '');
                     const hasScreenContext = !!screenAssistContext || !!attachedScreenContext;
                     const scanOnlyActions = osActions.length > 0 && osActions.every(action => action.type === 'livePointerScan');
-                    if (!attachedImage && (hasScreenContext || (isScreenScanRequest && (!osActions.length || scanOnlyActions)))) {
+                    if (!attachedImage && ((hasScreenContext && (!osActions.length || scanOnlyActions)) || (isScreenScanRequest && (!osActions.length || scanOnlyActions)))) {
                         try {
                             let screenContext = screenAssistContext || attachedScreenContext;
                             if (screenAssistContext && window.RiviftLivePointer?.getFreshAssistContext) {
@@ -45296,7 +45531,7 @@ self.addEventListener("message", function(ev) {
             <div class="setting-item" style="padding-top:0;"><span>OS名</span><span class="opacity-70">Rivift OS</span></div>
             <div class="setting-item"><span>バージョン</span><span class="opacity-70">${RIVIFT_OS_VERSION}</span></div>
             <div class="setting-item"><span>開発者</span><span class="opacity-70">DANGOKYOUDAI</span></div>
-            <div class="setting-item" style="padding-bottom:0;"><span>最終更新</span><span class="opacity-70">2026年10月</span></div>
+            <div class="setting-item" style="padding-bottom:0;"><span>最終更新</span><span class="opacity-70">2026年11月</span></div>
         </div>
         <div class="settings-card" style="max-width:480px;">
             <p class="settings-card-title">サーバー情報</p>
@@ -81528,7 +81763,7 @@ RiviftConnect.connectToServer = function () {
                     const highlight = document.createElement('div');
                     highlight.id = 'ai-screen-assist-highlight';
                     highlight.setAttribute('aria-label', '画面アシストの選択範囲');
-                    const z = window.RiviftLivePointer?.getAssistLayerZ?.() ?? 3195;
+                    const z = window.RiviftLivePointer?.getAssistFrameZ?.() ?? window.RiviftLivePointer?.getAssistLayerZ?.() ?? 3195;
                     highlight.style.cssText = `position:fixed;left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px;z-index:${z};pointer-events:none;box-sizing:border-box;border:3px solid #61a4ff;border-radius:7px;background:rgba(66,133,244,.12);box-shadow:0 0 0 2px rgba(9,24,48,.92),0 0 0 5px rgba(255,255,255,.92),0 0 34px 8px rgba(66,133,244,.72),inset 0 0 0 1px rgba(255,255,255,.56);`;
                     const label = document.createElement('span');
                     label.textContent = '選択中の画面';
@@ -90321,6 +90556,13 @@ function _getSocket() {
      - ページ切り替えドットのDock上配置
      ═══════════════════════════════════════════════════════════ -->
     <style id="rivift-mobile-hig-css">
+        :root {
+            --rv-dock-bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+            --rv-dock-h:80px;
+            --rv-dots-gap:10px;
+            --rv-dots-h:18px;
+        }
+
         body.mobile-mode.mobile-locked #mobile-dock,#mobile-dock.app-opening {
             opacity:0!important;
             pointer-events:none!important;
@@ -90527,7 +90769,7 @@ function _getSocket() {
 
         #mobile-home {
             padding-top:calc(var(--m-statusbar-height,44px) + 6px);
-            padding-bottom:calc(env(safe-area-inset-bottom,12px) + 94px);
+            padding-bottom:calc(var(--rv-dock-bottom) + var(--rv-dock-h) + var(--rv-dots-gap) + var(--rv-dots-h) + 8px);
             box-sizing:border-box;
             z-index:10;
             background:0 0;
@@ -90564,7 +90806,7 @@ function _getSocket() {
             height:100%;
             grid-template-columns:repeat(var(--grid-cols,4), var(--grid-cell-size,74px))!important;
             grid-template-rows:repeat(var(--grid-rows,6), var(--grid-row-size,74px))!important;
-            row-gap:var(--grid-gap,13px)!important;
+            row-gap:var(--grid-row-gap,var(--grid-gap,13px))!important;
             column-gap:var(--grid-gap,13px)!important;
             padding-left:var(--grid-pad-x,16px)!important;
             padding-right:var(--grid-pad-x,16px)!important;
@@ -90579,7 +90821,7 @@ function _getSocket() {
             .mobile-page.rp-mixed {
                 grid-template-columns:repeat(var(--grid-cols,6), var(--grid-cell-size,84px))!important;
                 grid-template-rows:repeat(var(--grid-rows,7), var(--grid-row-size,84px))!important;
-                row-gap:var(--grid-gap,16px)!important;
+                row-gap:var(--grid-row-gap,var(--grid-gap,16px))!important;
                 column-gap:var(--grid-gap,16px)!important;
                 padding-left:var(--grid-pad-x,24px)!important;
                 padding-right:var(--grid-pad-x,24px)!important;
@@ -91338,7 +91580,7 @@ function _getSocket() {
         }
 
         #mobile-page-indicator {
-            bottom:calc(env(safe-area-inset-bottom,12px) + 68px)!important;
+            bottom:calc(var(--rv-dock-bottom) + var(--rv-dock-h) + var(--rv-dots-gap))!important;
             z-index:45!important;
             pointer-events:auto!important;
             -webkit-backdrop-filter:blur(16px)!important;
@@ -91396,35 +91638,48 @@ function _getSocket() {
         }
 
         #mobile-dock {
-            bottom:calc(env(safe-area-inset-bottom,12px) + 12px)!important;
+            bottom:var(--rv-dock-bottom)!important;
+            margin:0!important;
             -webkit-backdrop-filter:blur(28px)saturate(180%)!important;
+            backdrop-filter:blur(28px)saturate(180%)!important;
             z-index:50!important;
             box-sizing:border-box!important;
             pointer-events:auto!important;
-            cursor:pointer!important;
             opacity:1!important;
             -webkit-tap-highlight-color:transparent!important;
-            background:#ffffffe0!important;
+            background:#ffffff8c!important;
             border:1px solid #ffffff73!important;
-            border-radius:9999px!important;
-            justify-content:space-between!important;
+            border-radius:32px!important;
+            justify-content:center!important;
             align-items:center!important;
-            width:calc(100% - 32px)!important;
-            max-width:360px!important;
-            height:48px!important;
-            padding:0 12px 0 18px!important;
+            gap:clamp(8px,2.6vw,14px)!important;
+            width:auto!important;
+            min-width:160px!important;
+            max-width:calc(100% - 24px)!important;
+            height:var(--rv-dock-h)!important;
+            padding:0 clamp(10px,3.4vw,16px)!important;
             transition:transform .34s cubic-bezier(.2,.9,.3,1),opacity .34s cubic-bezier(.2,.9,.3,1),background .24s!important;
             display:flex!important;
             position:absolute!important;
             left:50%!important;
             transform:translate(-50%)!important;
+            overflow:visible!important;
             box-shadow:0 8px 30px #00000038,inset 0 1px #fff9!important;
         }
 
+        #mobile-dock.dock-drag-over {
+            background:#ffffffb8!important;
+            transform:translate(-50%)scale(1.03)!important;
+        }
+
         body:not(.light-mode) #mobile-dock,body.dark-mode #mobile-dock {
-            background:#1c1c22d1!important;
+            background:#1c1c2294!important;
             border:1px solid #ffffff29!important;
             box-shadow:0 10px 36px #0000007a,inset 0 1px #ffffff29!important;
+        }
+
+        body:not(.light-mode) #mobile-dock.dock-drag-over,body.dark-mode #mobile-dock.dock-drag-over {
+            background:#2c2c36b8!important;
         }
 
         body.mobile-mode.mobile-locked #mobile-dock,body.app-open #mobile-dock {
@@ -91433,75 +91688,12 @@ function _getSocket() {
             transform:translate(-50%)translateY(24px)scale(.92)!important;
         }
 
-        #mobile-dock:active {
-            transform:translate(-50%)scale(.975)!important;
-        }
-
-        .mobile-dock-search-wrap {
-            color:#1c1c1e;
-            -webkit-user-select:none;
-            user-select:none;
-            flex:1;
-            align-items:center;
-            gap:10px;
-            min-width:0;
-            display:flex;
-        }
-
-        body:not(.light-mode) .mobile-dock-search-wrap,body.dark-mode .mobile-dock-search-wrap {
-            color:#fff;
-        }
-
-        .mobile-dock-search-icon {
-            opacity:.6;
-            flex-shrink:0;
-        }
-
-        .mobile-dock-search-text {
-            letter-spacing:-.2px;
-            opacity:.85;
-            white-space:nowrap;
-            text-overflow:ellipsis;
-            font-size:14px;
-            font-weight:500;
-            overflow:hidden;
-        }
-
-        .mobile-dock-actions {
-            flex-shrink:0;
-            align-items:center;
-            gap:6px;
-            display:flex;
-        }
-
-        .mobile-dock-action-btn {
-            width:36px;
-            height:36px;
-            color:inherit;
-            cursor:pointer;
-            -webkit-tap-highlight-color:transparent;
-            background:#0000000f;
-            border:none;
-            border-radius:50%;
-            justify-content:center;
-            align-items:center;
-            transition:transform .14s,background .14s;
-            display:flex;
-        }
-
-        body:not(.light-mode) .mobile-dock-action-btn,body.dark-mode .mobile-dock-action-btn {
-            background:#ffffff1f;
-        }
-
-        .mobile-dock-action-btn:active {
-            background:#007aff40;
-            transform:scale(.88);
-        }
 
         .mobile-dock-icon {
             cursor:pointer!important;
-            width:58px!important;
-            height:58px!important;
+            flex:0 0 auto!important;
+            width:clamp(46px,calc((100vw - 96px)/5),58px)!important;
+            height:clamp(46px,calc((100vw - 96px)/5),58px)!important;
             box-shadow:none!important;
             touch-action:none!important;
             -webkit-user-select:none!important;
@@ -92975,9 +93167,11 @@ function _getSocket() {
             var STORAGE_LAYOUT = 'rivift_mobile_home_layout_v7';
             var STORAGE_DOCK = 'rivift_mobile_dock_v5';
             var STORAGE_REMOVED = 'rivift_mobile_removed_apps_v5';
+            var STORAGE_DOCK_SEED = 'rivift_mobile_dock_seeded_v1';
+            var DEFAULT_DOCK_IDS = ['browser', 'mail', 'files', 'settings'];
 
             var homeLayout = [];
-            var dockIds = []; // 理想UI準拠：下の細長いバーは空けておく
+            var dockIds = []; // Dockに固定するアプリID（最大5個）
             var removedAppIds = new Set();
             var editMode = false;
             var currentPage = 0;
@@ -93424,6 +93618,8 @@ function _getSocket() {
                     homeLayout = homeLayout.filter(function (it) { return it.id !== 'virus-buster'; });
                     dockIds = dockIds.filter(function (id) { return id !== 'virus-buster'; });
 
+                    seedDefaultDock();
+
                     var all = getAllApps();
                     var existing = new Set();
                     dockIds.forEach(function (id) { existing.add(id); });
@@ -93447,6 +93643,28 @@ function _getSocket() {
                     homeLayout = buildDefaultLayout();
                     saveState();
                 }
+            }
+
+            /* 初回のみ、Dockに標準アプリを配置（ホーム画面側からは重複しないよう取り除く） */
+            function seedDefaultDock() {
+                try {
+                    if (localStorage.getItem(STORAGE_DOCK_SEED) === '1') return;
+                    if (dockIds.length > 0) {
+                        localStorage.setItem(STORAGE_DOCK_SEED, '1');
+                        return;
+                    }
+                    var all = getAllApps();
+                    var picked = DEFAULT_DOCK_IDS.filter(function (id) {
+                        return !removedAppIds.has(id) && all.some(function (a) { return a.id === id; });
+                    });
+                    if (picked.length === 0) return;
+                    dockIds = picked;
+                    homeLayout = homeLayout.filter(function (it) {
+                        return !(it && it.type === 'app' && picked.indexOf(it.id) !== -1);
+                    });
+                    localStorage.setItem(STORAGE_DOCK_SEED, '1');
+                    saveState();
+                } catch (e) { }
             }
 
             function saveState() {
@@ -94049,30 +94267,30 @@ function _getSocket() {
                 var maxGridW = containerW - (minSidePad * 2);
                 var cellFromWidth = Math.floor((maxGridW - (cols - 1) * gap) / cols);
 
-                var maxGridH = containerH - 4; // 上下マージンを最小限に詰める
-                var targetRows = isTablet ? 8 : (containerH >= 520 ? 7 : (containerH >= 420 ? 6 : 5));
-                var cellFromHeight = Math.floor((maxGridH - (targetRows - 1) * gap) / targetRows);
-                var rows = targetRows;
-                if (cellFromHeight < 52 && rows > 6) {
-                    rows = 6;
-                    cellFromHeight = Math.floor((maxGridH - (rows - 1) * gap) / rows);
-                }
-                if (cellFromHeight < 46 && rows > 5) {
-                    rows = 5;
-                    cellFromHeight = Math.floor((maxGridH - (rows - 1) * gap) / rows);
-                }
-
-                var cellSize = Math.min(cellFromWidth, cellFromHeight);
-                cellSize = Math.max(46, Math.min(cellSize, isTablet ? 84 : 74));
+                // 縦方向：セルは正方形のまま、高さに収まる最大行数を採用。
+                // 余った高さは「行間」と「上下の余白」に均等配分し、下側だけ空くのを防ぐ。
+                var maxGridH = Math.max(120, containerH - 8);
+                var maxCell = isTablet ? 88 : 80;
+                var cellSize = Math.max(46, Math.min(cellFromWidth, maxCell));
+                var rows = Math.max(3, Math.floor((maxGridH + gap) / (cellSize + gap)));
+                var cellFromHeight = Math.floor((maxGridH - (rows - 1) * gap) / rows);
+                if (cellFromHeight < cellSize) cellSize = Math.max(40, cellFromHeight);
                 var rowSize = cellSize;
 
+                var baseGridH = rows * rowSize + (rows - 1) * gap;
+                var leftoverH = Math.max(0, maxGridH - baseGridH);
+                var rowGap = gap;
+                if (rows > 1) {
+                    rowGap = gap + Math.min(Math.floor(leftoverH / (rows - 1)), Math.round(gap * 0.75));
+                }
+
                 var actualGridW = cols * cellSize + (cols - 1) * gap;
-                var actualGridH = rows * rowSize + (rows - 1) * gap;
+                var actualGridH = rows * rowSize + (rows - 1) * rowGap;
 
                 var padX = Math.max(8, Math.floor((containerW - actualGridW) / 2));
-                var remainH = Math.max(4, containerH - actualGridH);
-                var padTop = 4; // 上に詰める（余白を上部に溜めない）
-                var padBottom = Math.max(4, remainH - padTop);
+                var remainH = Math.max(0, containerH - actualGridH);
+                var padTop = Math.floor(remainH / 2);
+                var padBottom = remainH - padTop;
 
                 var iconSize = Math.max(40, Math.min(54, Math.round(cellSize * 0.68)));
 
@@ -94165,6 +94383,7 @@ function _getSocket() {
                     pageEl.style.setProperty('--grid-cell-size', cellSize + 'px');
                     pageEl.style.setProperty('--grid-row-size', rowSize + 'px');
                     pageEl.style.setProperty('--grid-gap', gap + 'px');
+                    pageEl.style.setProperty('--grid-row-gap', rowGap + 'px');
                     pageEl.style.setProperty('--grid-pad-x', padX + 'px');
                     pageEl.style.setProperty('--grid-pad-top', padTop + 'px');
                     pageEl.style.setProperty('--grid-pad-bottom', padBottom + 'px');
@@ -94185,12 +94404,53 @@ function _getSocket() {
                 pager.style.transform = 'translateX(-' + (currentPage * 100) + '%)';
             }
 
-            /* ════════ 10. 下の細長いバー（スマート検索＆クイックコントロールカプセル） ════════ */
+            /* ════════ 10. Dock（アプリアイコン） ════════ */
+            function createDockIcon(appId) {
+                var app = getAppById(appId) || { id: appId, name: appId, icon: 'icons/AppCreator.svg' };
+
+                var el = document.createElement('div');
+                el.className = 'mobile-dock-icon';
+                el.dataset.appId = appId;
+                el.title = app.name || appId;
+
+                var wrap = document.createElement('div');
+                wrap.className = 'dock-img-wrap';
+                if (appId === 'clock') {
+                    wrap.innerHTML = generateClockIconSvg();
+                    wrap.classList.add('mobile-live-clock-icon');
+                } else {
+                    var iconSrc = app.icon || 'icons/AppCreator.svg';
+                    var img = document.createElement('img');
+                    img.src = (window.RiviftIconLoader ? window.RiviftIconLoader.best(iconSrc) : iconSrc);
+                    img.alt = app.name || appId;
+                    img.dataset.riIcon = '1';
+                    img.draggable = false;
+                    wrap.appendChild(img);
+                }
+                el.appendChild(wrap);
+
+                var del = document.createElement('div');
+                del.className = 'dock-delete-badge';
+                del.textContent = '×';
+                del.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+                del.addEventListener('touchstart', function (e) { e.stopPropagation(); }, { passive: false });
+                del.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+                del.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    removeItem(appId);
+                });
+                el.appendChild(del);
+
+                setupDockIcon(el, appId);
+                return el;
+            }
+
             function renderDock() {
-                var bar = document.getElementById('mobile-search-bar');
-                if (bar) bar.remove();
-                var searchModal = document.getElementById('mobile-search-modal');
-                if (searchModal) searchModal.remove();
+                var oldBar = document.getElementById('mobile-search-bar');
+                if (oldBar) oldBar.remove();
+                var oldModal = document.getElementById('mobile-search-modal');
+                if (oldModal) oldModal.remove();
 
                 var home = document.getElementById('mobile-home') || document.body;
                 var dock = document.getElementById('mobile-dock');
@@ -94201,70 +94461,12 @@ function _getSocket() {
                 }
 
                 dock.style.display = 'flex';
-                dock.innerHTML = '' +
-                    '<div class="mobile-dock-search-wrap" id="msb-search-trigger" title="タップして検索">' +
-                        '<svg class="mobile-dock-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
-                            '<circle cx="11" cy="11" r="8"></circle>' +
-                            '<line x1="21" y1="21" x2="16.65" y2="16.65"></line>' +
-                        '</svg>' +
-                        '<span class="mobile-dock-search-text">アプリやWebを検索</span>' +
-                    '</div>' +
-                    '<div class="mobile-dock-actions">' +
-                        '<button class="mobile-dock-action-btn" id="msb-btn-control" title="コントロールセンター">' +
-                            '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<line x1="4" y1="21" x2="4" y2="14"></line>' +
-                                '<line x1="4" y1="10" x2="4" y2="3"></line>' +
-                                '<line x1="12" y1="21" x2="12" y2="12"></line>' +
-                                '<line x1="12" y1="8" x2="12" y2="3"></line>' +
-                                '<line x1="20" y1="21" x2="20" y2="16"></line>' +
-                                '<line x1="20" y1="12" x2="20" y2="3"></line>' +
-                                '<line x1="1" y1="14" x2="7" y2="14"></line>' +
-                                '<line x1="9" y1="8" x2="15" y2="8"></line>' +
-                                '<line x1="17" y1="16" x2="23" y2="16"></line>' +
-                            '</svg>' +
-                        '</button>' +
-                        '<button class="mobile-dock-action-btn" id="msb-btn-drawer" title="すべてのアプリ">' +
-                            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-                                '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect>' +
-                                '<rect x="14" y="3" width="7" height="7" rx="1.5"></rect>' +
-                                '<rect x="14" y="14" width="7" height="7" rx="1.5"></rect>' +
-                                '<rect x="3" y="14" width="7" height="7" rx="1.5"></rect>' +
-                            '</svg>' +
-                        '</button>' +
-                    '</div>';
+                dock.innerHTML = '';
+                dock.classList.toggle('dock-empty', dockIds.length === 0);
 
-                var trigger = dock.querySelector('#msb-search-trigger');
-                if (trigger) {
-                    trigger.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        if (editMode) return;
-                        if (typeof openAppDrawer === 'function') {
-                            openAppDrawer();
-                            var inp = document.getElementById('mobile-drawer-search');
-                            if (inp) setTimeout(function() { inp.focus(); }, 120);
-                        }
-                    });
-                }
-                var btnControl = dock.querySelector('#msb-btn-control');
-                if (btnControl) {
-                    btnControl.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        if (editMode) return;
-                        if (typeof toggleControlCenter === 'function') {
-                            toggleControlCenter();
-                        }
-                    });
-                }
-                var btnDrawer = dock.querySelector('#msb-btn-drawer');
-                if (btnDrawer) {
-                    btnDrawer.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        if (editMode) return;
-                        if (typeof openAppDrawer === 'function') {
-                            openAppDrawer();
-                        }
-                    });
-                }
+                dockIds.forEach(function (id) {
+                    dock.appendChild(createDockIcon(id));
+                });
             }
 
             /* ── Dock アイコンの操作・ドラッグ＆ドロップ（並び替え・ホーム画面への引き出し） ── */
@@ -94773,6 +94975,23 @@ function _getSocket() {
                     }
                 }, 1000);
 
+                var pagerWrapEl = document.getElementById('mobile-pager-wrapper');
+                if (pagerWrapEl && window.ResizeObserver) {
+                    var roTimer = null, lastRoW = 0, lastRoH = 0;
+                    new ResizeObserver(function () {
+                        var w = pagerWrapEl.clientWidth, h = pagerWrapEl.clientHeight;
+                        if (!w || !h) return;
+                        if (Math.abs(w - lastRoW) < 2 && Math.abs(h - lastRoH) < 2) return;
+                        lastRoW = w; lastRoH = h;
+                        if (roTimer) clearTimeout(roTimer);
+                        roTimer = setTimeout(function () {
+                            if (!document.body.classList.contains('mobile-mode')) return;
+                            if (editMode || isAnyDragging) return;
+                            renderHome();
+                        }, 80);
+                    }).observe(pagerWrapEl);
+                }
+
                 var resizeTimer = null;
                 window.addEventListener('resize', function () {
                     if (!document.body.classList.contains('mobile-mode')) return;
@@ -94822,8 +95041,11 @@ function _getSocket() {
                     localStorage.removeItem(STORAGE_LAYOUT);
                     localStorage.removeItem(STORAGE_DOCK);
                     localStorage.removeItem(STORAGE_REMOVED);
+                    localStorage.removeItem(STORAGE_DOCK_SEED);
                     removedAppIds.clear();
+                    dockIds = [];
                     homeLayout = buildDefaultLayout();
+                    seedDefaultDock();
                     saveState();
                     renderHome();
                 }
