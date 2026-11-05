@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.3.4";
+        var CURRENT_FILE_VERSION = "5.3.5";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -7142,6 +7142,157 @@ body.light-mode .nearby-peer-card {
   overflow: hidden;
 }
 
+/* ── Apple iMessage風 送信アニメーション ─────────────────────────── */
+@keyframes connect-msg-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+#app-window-connect .message.sent.connect-msg-new {
+  transform-origin: bottom right;
+  animation: connect-msg-appear 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── 画像メッセージスタイル ─────────────────────────── */
+#app-window-connect .bubble.has-image {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+#app-window-connect .message-image-container {
+  position: relative;
+  display: inline-block;
+  border-radius: 18px;
+  overflow: hidden;
+  max-width: 340px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  cursor: pointer;
+}
+#app-window-connect .message-image-container img {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  border-radius: 18px;
+  transition: transform 0.2s ease;
+}
+#app-window-connect .message-image-container:hover img {
+  transform: scale(1.02);
+}
+#app-window-connect .message-image-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#app-window-connect .message-image-container:hover .message-image-overlay {
+  opacity: 1;
+}
+
+/* ── 音声プレビュープレイヤー ─────────────────────────── */
+#app-window-connect .message-audio-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px;
+  min-width: 250px;
+  max-width: 340px;
+}
+#app-window-connect .audio-play-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+#app-window-connect .message.received .audio-play-btn {
+  background: var(--accent-color, #007bff);
+  color: #fff;
+}
+#app-window-connect .audio-play-btn:hover {
+  transform: scale(1.08);
+  filter: brightness(1.15);
+}
+#app-window-connect .audio-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#app-window-connect .audio-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#app-window-connect .audio-progress-wrap {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+#app-window-connect .message.received .audio-progress-wrap {
+  background: rgba(0, 0, 0, 0.12);
+}
+#app-window-connect .audio-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: #fff;
+  border-radius: 3px;
+  pointer-events: none;
+  transition: width 0.08s linear;
+}
+#app-window-connect .message.received .audio-progress-bar {
+  background: var(--accent-color, #007bff);
+}
+#app-window-connect .audio-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  opacity: 0.75;
+}
+#app-window-connect .audio-dl-btn {
+  color: inherit;
+  opacity: 0.75;
+  padding: 6px;
+  font-size: 14px;
+  text-decoration: none;
+  transition: opacity 0.18s ease;
+  flex-shrink: 0;
+}
+#app-window-connect .audio-dl-btn:hover {
+  opacity: 1;
+}
+/* ──────────────────────────────────────────────────────────────────── */
+
 #app-window-connect #send-message-btn:disabled {
   opacity: .5;
   cursor: not-allowed;
@@ -7208,7 +7359,10 @@ body.light-mode .nearby-peer-card {
   flex-direction: column;
   display: none;
   position: absolute;
-  inset: 0;
+  top: 40px; /* タイトルバー(40px)を避けてウィンドウ操作を妨げない */
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow: hidden;
 }
 
@@ -16106,6 +16260,146 @@ body.light-mode #ai-selection-panel {
         <!-- Desktop notifications will appear here -->
     </div>
 
+    <!-- OS着信ポップアップ（Connectバックグラウンド着信通知） -->
+    <div id="os-incoming-call-toast" class="os-incoming-call-toast" style="display: none;">
+        <div class="os-call-toast-inner">
+            <div class="os-call-toast-avatar" id="os-call-toast-avatar"></div>
+            <div class="os-call-toast-info">
+                <div class="os-call-toast-name" id="os-call-toast-name">発信者名</div>
+                <div class="os-call-toast-sub" id="os-call-toast-sub">
+                    <span class="os-call-toast-pulse"></span>
+                    <span id="os-call-toast-type">Rivift Connect 通話着信</span>
+                </div>
+            </div>
+            <div class="os-call-toast-actions">
+                <button id="os-call-toast-reject" class="os-call-toast-btn reject" title="拒否">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+                <button id="os-call-toast-accept" class="os-call-toast-btn accept" title="受話">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+    .os-incoming-call-toast {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        z-index: 999999;
+        min-width: 320px;
+        max-width: 400px;
+        background: rgba(28, 32, 44, 0.92);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 18px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        color: #fff;
+        padding: 14px 18px;
+        animation: osCallToastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        transition: transform 0.25s ease, opacity 0.25s ease;
+    }
+    .os-incoming-call-toast.closing {
+        transform: translateY(-20px) scale(0.95);
+        opacity: 0;
+    }
+    @keyframes osCallToastIn {
+        from { transform: translateY(-30px) scale(0.92); opacity: 0; }
+        to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .os-call-toast-inner {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .os-call-toast-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background-size: cover;
+        background-position: center;
+        background-color: #3b4252;
+        flex-shrink: 0;
+        border: 2px solid rgba(255, 255, 255, 0.25);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .os-call-toast-info {
+        flex-grow: 1;
+        min-width: 0;
+    }
+    .os-call-toast-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: #ffffff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 2px;
+    }
+    .os-call-toast-sub {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.75);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .os-call-toast-pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 8px #10b981;
+        animation: osPulseRing 1.2s infinite;
+    }
+    @keyframes osPulseRing {
+        0% { transform: scale(0.9); opacity: 0.8; }
+        50% { transform: scale(1.3); opacity: 1; }
+        100% { transform: scale(0.9); opacity: 0.8; }
+    }
+    .os-call-toast-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+    }
+    .os-call-toast-btn {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        color: #fff;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .os-call-toast-btn:hover {
+        transform: scale(1.08);
+    }
+    .os-call-toast-btn:active {
+        transform: scale(0.95);
+    }
+    .os-call-toast-btn.reject {
+        background: #ef4444;
+        box-shadow: 0 4px 14px rgba(239, 68, 68, 0.45);
+    }
+    .os-call-toast-btn.accept {
+        background: #10b981;
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45);
+        animation: osShakeCall 1.8s infinite;
+    }
+    @keyframes osShakeCall {
+        0%, 80%, 100% { transform: rotate(0deg); }
+        85% { transform: rotate(15deg); }
+        90% { transform: rotate(-15deg); }
+        95% { transform: rotate(10deg); }
+    }
+    </style>
+
     <!-- Taskbar App Context Menu (template, will be cloned and positioned by JS) -->
     <div id="taskbar-app-context-menu-template" class="taskbar-context-menu hidden">
         <!-- Items will be added by JS -->
@@ -16790,7 +17084,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.4';
+            var RIVIFT_OS_VERSION = '5.3.5';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -64175,6 +64469,11 @@ body.light-mode #ac-root {
                                     <button type="submit" id="send-message-btn" title="送信"><i class="fa-solid fa-paper-plane"></i></button>
                                 </form>
                                 <div id="stamp-panel" class="hidden"></div>
+                                <div id="connect-drop-overlay" style="display:none; position:absolute; inset:0; background:rgba(18,22,34,0.85); backdrop-filter:blur(8px); z-index:90; flex-direction:column; align-items:center; justify-content:center; border:2px dashed #3b82f6; border-radius:12px; pointer-events:none;">
+                                    <i class="fas fa-cloud-arrow-up" style="font-size:42px; color:#3b82f6; margin-bottom:12px;"></i>
+                                    <div style="font-size:16px; font-weight:700; color:#fff;">ファイルをドロップして送信</div>
+                                    <div style="font-size:12px; color:rgba(255,255,255,0.7); margin-top:4px;">ファイルマネージャーまたはPCからドロップ</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -64244,14 +64543,40 @@ body.light-mode #ac-root {
                                     endCall(true);
                                 }
                                 if (typeof stopAllSounds === 'function') stopAllSounds();
-                                const RC = connectWindow._RC;
+                                const RC = connectWindow._RC || window.RiviftConnect;
                                 if (RC) {
-                                    if (RC.NOTIFICATION_SOUND) { RC.NOTIFICATION_SOUND.pause(); RC.NOTIFICATION_SOUND.src = ''; }
-                                    if (RC.socket && RC.socket.connected) RC.socket.disconnect();
+                                    if (RC.NOTIFICATION_SOUND) { RC.NOTIFICATION_SOUND.pause(); }
+                                    // ウィンドウ閉じ時はソケットを切断せず、バックグラウンド待機を継続！
+                                    RC.isWindowOpen = false;
+                                    RC.appWindow = null;
                                 }
                                 if (window.globalCallState) { window.globalCallState.active = false; window.globalCallState.startedAt = null; }
                             },
                         });
+                        window.openConnectApp = function(targetEmail = null) {
+                            const existingWin = document.getElementById('app-window-connect');
+                            if (existingWin) {
+                                if (existingWin.classList.contains('minimized')) {
+                                    existingWin.classList.remove('minimized');
+                                }
+                                bringToFront(existingWin);
+                                if (targetEmail && window.RiviftConnect && typeof window.RiviftConnect.startConversation === 'function') {
+                                    // ウィンドウはすでに開いているのでDOM準備済み、即時遷移
+                                    window.RiviftConnect.startConversation(targetEmail, 'chat');
+                                }
+                                return existingWin;
+                            }
+                            const app = apps.find(a => a.id === 'connect');
+                            if (app) {
+                                // ウィンドウを新規作成する場合: initializeAppUI 完了後に startConversation を呼ぶ
+                                // _pendingStartEmail をセットしておき、initializeAppUI 内で拾う
+                                if (targetEmail) {
+                                    if (!window.RiviftConnect) window.RiviftConnect = {};
+                                    window.RiviftConnect._pendingStartEmail = targetEmail;
+                                }
+                                app.launcher();
+                            }
+                        };
                     }
                 },
 
@@ -76836,29 +77161,47 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
             }
 
             function initializeConnectApp(appWindow) {
-                const RiviftConnect = {};
-                RiviftConnect.currentUser = null;
-                RiviftConnect.activeConversation = null;
-                RiviftConnect.STAMPS = ['./cdn/iconify/fluent-emoji_thumbs-up.svg', './cdn/iconify/fluent-emoji_ok-hand.svg', './cdn/iconify/fluent-emoji_smiling-face-with-heart-eyes.svg', './cdn/iconify/fluent-emoji_rolling-on-the-floor-laughing.svg', './cdn/iconify/fluent-emoji_face-with-tears-of-joy.svg', './cdn/iconify/fluent-emoji_thinking-face.svg', './cdn/iconify/fluent-emoji_partying-face.svg', './cdn/iconify/fluent-emoji_rocket.svg'];
-                RiviftConnect.NOTIFICATION_SOUND = new Audio('https://cdn.jsdelivr.net/gh/k-logic/sounds@main/misc/notification_high-intensity.wav');
-                RiviftConnect.hasUserInteracted = false;
-                RiviftConnect.SERVER_URL = SERVER_URL;
-                RiviftConnect.socket = null;
+                let RiviftConnect = window.RiviftConnect;
+                const isFirstInit = !RiviftConnect;
+                if (isFirstInit) {
+                    RiviftConnect = {};
+                    RiviftConnect.currentUser = null;
+                    RiviftConnect.activeConversation = null;
+                    RiviftConnect._usersCache = {};
+                    RiviftConnect._publicKeysCache = {};
+                    RiviftConnect._messagesCache = {};
+                    RiviftConnect._conversationRequestId = 0;
+                    RiviftConnect._dbUpdateDebounceTimer = null;
+                    RiviftConnect.STAMPS = ['./cdn/iconify/fluent-emoji_thumbs-up.svg', './cdn/iconify/fluent-emoji_ok-hand.svg', './cdn/iconify/fluent-emoji_smiling-face-with-heart-eyes.svg', './cdn/iconify/fluent-emoji_rolling-on-the-floor-laughing.svg', './cdn/iconify/fluent-emoji_face-with-tears-of-joy.svg', './cdn/iconify/fluent-emoji_thinking-face.svg', './cdn/iconify/fluent-emoji_partying-face.svg', './cdn/iconify/fluent-emoji_rocket.svg'];
+                    RiviftConnect.NOTIFICATION_SOUND = new Audio('/sounds/connect_come.mp3');
+                    RiviftConnect.hasUserInteracted = false;
+                    RiviftConnect.SERVER_URL = SERVER_URL;
+                    RiviftConnect.socket = null;
+                    window.RiviftConnect = RiviftConnect;
+                }
 
-                RiviftConnect.DOM = {
-                    authView: appWindow.querySelector('#auth-view'), authForm: appWindow.querySelector('#auth-form'), authEmail: appWindow.querySelector('#auth-email'), authDisplayName: appWindow.querySelector('#auth-display-name'), authPassword: appWindow.querySelector('#auth-password'), authPasswordConfirm: appWindow.querySelector('#auth-password-confirm'), authBtn: appWindow.querySelector('#auth-btn'), authToggleLink: appWindow.querySelector('#auth-toggle-link'),
-                    mainView: appWindow.querySelector('#main-view'),
-                    currentUserDisplayName: appWindow.querySelector('#current-user-display-name'), currentUserIcon: appWindow.querySelector('#current-user-icon'), logoutBtn: appWindow.querySelector('#logout-btn'),
-                    addFriendBtn: appWindow.querySelector('#add-friend-btn'), newMailBtn: appWindow.querySelector('#new-mail-btn'),
-                    contactList: appWindow.querySelector('#contact-list'),
-                    requestsBadge: appWindow.querySelector('#requests-badge'), requestList: appWindow.querySelector('#request-list'),
-                    sentRequestList: appWindow.querySelector('#sent-request-list'),
-                    welcomeView: appWindow.querySelector('#welcome-view'), conversationView: appWindow.querySelector('#conversation-view'),
-                    chatPartnerIcon: appWindow.querySelector('#chat-partner-icon'), chatPartnerDisplayName: appWindow.querySelector('#chat-partner-display-name'),
-                    messages: appWindow.querySelector('#messages'), messageForm: appWindow.querySelector('#message-form'),
-                    attachmentBtn: appWindow.querySelector('#attachment-btn'), fileUploadInput: appWindow.querySelector('#file-upload-input'), messageInput: appWindow.querySelector('#message-input'),
-                    stampBtn: appWindow.querySelector('#stamp-btn'), stampPanel: appWindow.querySelector('#stamp-panel'), sendMessageBtn: appWindow.querySelector('#send-message-btn'),
-                };
+                RiviftConnect.appWindow = appWindow;
+                RiviftConnect.isWindowOpen = !!appWindow;
+
+                if (appWindow) {
+                    appWindow._RC = RiviftConnect;
+                    RiviftConnect.DOM = {
+                        authView: appWindow.querySelector('#auth-view'), authForm: appWindow.querySelector('#auth-form'), authEmail: appWindow.querySelector('#auth-email'), authDisplayName: appWindow.querySelector('#auth-display-name'), authPassword: appWindow.querySelector('#auth-password'), authPasswordConfirm: appWindow.querySelector('#auth-password-confirm'), authBtn: appWindow.querySelector('#auth-btn'), authToggleLink: appWindow.querySelector('#auth-toggle-link'),
+                        mainView: appWindow.querySelector('#main-view'),
+                        currentUserDisplayName: appWindow.querySelector('#current-user-display-name'), currentUserIcon: appWindow.querySelector('#current-user-icon'), logoutBtn: appWindow.querySelector('#logout-btn'),
+                        addFriendBtn: appWindow.querySelector('#add-friend-btn'), newMailBtn: appWindow.querySelector('#new-mail-btn'),
+                        contactList: appWindow.querySelector('#contact-list'),
+                        requestsBadge: appWindow.querySelector('#requests-badge'), requestList: appWindow.querySelector('#request-list'),
+                        sentRequestList: appWindow.querySelector('#sent-request-list'),
+                        welcomeView: appWindow.querySelector('#welcome-view'), conversationView: appWindow.querySelector('#conversation-view'),
+                        chatPartnerIcon: appWindow.querySelector('#chat-partner-icon'), chatPartnerDisplayName: appWindow.querySelector('#chat-partner-display-name'),
+                        messages: appWindow.querySelector('#messages'), messageForm: appWindow.querySelector('#message-form'),
+                        attachmentBtn: appWindow.querySelector('#attachment-btn'), fileUploadInput: appWindow.querySelector('#file-upload-input'), messageInput: appWindow.querySelector('#message-input'),
+                        stampBtn: appWindow.querySelector('#stamp-btn'), stampPanel: appWindow.querySelector('#stamp-panel'), sendMessageBtn: appWindow.querySelector('#send-message-btn'),
+                    };
+                } else {
+                    RiviftConnect.DOM = RiviftConnect.DOM || {};
+                }
 
                 RiviftConnect.renderStampPanel = function () {
                     const panel = RiviftConnect.DOM.stampPanel;
@@ -77132,6 +77475,68 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 let vcTimerInterval = null;
                 let vcTimerSeconds = 0;
 
+                function showOsCallPopup(payload, callerData, detectedCallType) {
+                    const toast = document.getElementById('os-incoming-call-toast');
+                    if (!toast) return;
+
+                    initializeSounds();
+                    if (ringtone) {
+                        ringtone.loop = true;
+                        ringtone.play().catch(() => {});
+                    }
+
+                    const avatarEl = document.getElementById('os-call-toast-avatar');
+                    const nameEl = document.getElementById('os-call-toast-name');
+                    const typeEl = document.getElementById('os-call-toast-type');
+                    const rejectBtn = document.getElementById('os-call-toast-reject');
+                    const acceptBtn = document.getElementById('os-call-toast-accept');
+
+                    if (avatarEl) avatarEl.style.backgroundImage = `url(${callerData.icon || ''})`;
+                    if (nameEl) nameEl.textContent = callerData.displayName || payload.from;
+                    if (typeEl) {
+                        typeEl.innerHTML = detectedCallType === 'video'
+                            ? '<i class="fas fa-video"></i> Rivift Connect ビデオ通話'
+                            : '<i class="fas fa-phone-volume"></i> Rivift Connect 音声通話';
+                    }
+
+                    toast.classList.remove('closing');
+                    toast.style.display = 'block';
+
+                    if (rejectBtn) {
+                        rejectBtn.onclick = () => {
+                            hideOsCallPopup();
+                            endCall(true, "通話を拒否しました");
+                        };
+                    }
+
+                    if (acceptBtn) {
+                        acceptBtn.onclick = async () => {
+                            hideOsCallPopup();
+                            if (typeof window.openConnectApp === 'function') {
+                                window.openConnectApp();
+                            }
+                            setTimeout(() => {
+                                acceptCall();
+                            }, 200);
+                        };
+                    }
+                }
+
+                function hideOsCallPopup() {
+                    const toast = document.getElementById('os-incoming-call-toast');
+                    if (toast) {
+                        toast.classList.add('closing');
+                        setTimeout(() => {
+                            toast.style.display = 'none';
+                            toast.classList.remove('closing');
+                        }, 300);
+                    }
+                    if (typeof ringtone !== 'undefined' && ringtone) {
+                        ringtone.pause();
+                        ringtone.currentTime = 0;
+                    }
+                }
+
                 function initializeSounds() {
                     if (!ringtone) {
                         ringtone = new Audio('sounds/incoming-call.wav');
@@ -77144,17 +77549,22 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 }
 
                 function manageCallUI(isCalling, statusText = '') {
-                    appWindow.querySelector('#start-call-btn').classList.toggle('hidden', isCalling);
-                    const vcBtn = appWindow.querySelector('#start-video-call-btn');
-                    if (vcBtn) vcBtn.classList.toggle('hidden', isCalling);
-                    appWindow.querySelector('#call-controls').classList.toggle('hidden', !isCalling);
-                    appWindow.querySelector('#call-status').textContent = statusText;
+                    if (appWindow) {
+                        const startCallBtn = appWindow.querySelector('#start-call-btn');
+                        if (startCallBtn) startCallBtn.classList.toggle('hidden', isCalling);
+                        const vcBtn = appWindow.querySelector('#start-video-call-btn');
+                        if (vcBtn) vcBtn.classList.toggle('hidden', isCalling);
+                        const callCtrl = appWindow.querySelector('#call-controls');
+                        if (callCtrl) callCtrl.classList.toggle('hidden', !isCalling);
+                        const callStatus = appWindow.querySelector('#call-status');
+                        if (callStatus) callStatus.textContent = statusText;
+                    }
 
                     window.globalCallState = window.globalCallState || {};
                     window.globalCallState.active = isCalling;
                     window.globalCallState.status = statusText;
                     if (isCalling) {
-                        const nameEl = appWindow.querySelector('#chat-partner-display-name');
+                        const nameEl = appWindow?.querySelector('#chat-partner-display-name');
                         window.globalCallState.partnerName = nameEl ? nameEl.textContent : '通話中';
                         if (!window.globalCallState.startedAt) window.globalCallState.startedAt = Date.now();
                         window.globalCallState.end = () => { if (typeof endCall === 'function') endCall(true); };
@@ -77166,6 +77576,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 function stopAllSounds() {
                     if (ringtone) { ringtone.pause(); ringtone.currentTime = 0; }
                     if (callingSound) { callingSound.pause(); callingSound.currentTime = 0; }
+                    hideOsCallPopup();
                 }
 
                 async function getFreshIceServers() {
@@ -77244,21 +77655,36 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                     console.log("📞 Socket経由でサーバーにICEサーバーの情報を問い合わせています...");
 
-                    const iceServers = await new Promise((resolve, reject) => {
-                        RiviftConnect.socket.emit('get-ice-servers', {}, (response) => {
-                            if (response.error) {
-                                reject(new Error(response.error));
-                            } else {
-                                resolve(response.iceServers);
-                            }
-                        });
-                    });
+                    const DEFAULT_STUN = [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ];
 
-                    console.log("✅ Socket経由でサーバーからICEサーバーの情報を取得しました！:", iceServers);
+                    let iceServers = DEFAULT_STUN;
+                    try {
+                        iceServers = await new Promise((resolve) => {
+                            if (!RiviftConnect.socket || !RiviftConnect.socket.connected) return resolve(DEFAULT_STUN);
+                            const timer = setTimeout(() => resolve(DEFAULT_STUN), 3000);
+                            RiviftConnect.socket.emit('get-ice-servers', {}, (response) => {
+                                clearTimeout(timer);
+                                if (response && Array.isArray(response.iceServers) && response.iceServers.length > 0) {
+                                    resolve(response.iceServers);
+                                } else {
+                                    resolve(DEFAULT_STUN);
+                                }
+                            });
+                        });
+                    } catch (e) {
+                        console.warn('ICEサーバー取得エラー、デフォルトSTUNにフォールバック:', e);
+                        iceServers = DEFAULT_STUN;
+                    }
+
+                    console.log("✅ ICEサーバー設定完了:", iceServers);
 
                     const configuration = {
                         iceServers: iceServers,
-                        iceTransportPolicy: 'all', // 着信側と統一: P2P優先、不可の場合TURNにフォールバック
+                        iceTransportPolicy: 'all',
                     };
 
                     peerConnection = new RTCPeerConnection(configuration);
@@ -77303,7 +77729,11 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 remoteVideo.style.display = 'block';
                             }
                         } else {
-                            appWindow.querySelector('#remote-audio').srcObject = stream;
+                            const remoteAudio = appWindow.querySelector('#remote-audio');
+                            if (remoteAudio) {
+                                remoteAudio.srcObject = stream;
+                                remoteAudio.play().catch(e => console.warn('Audio play failed:', e));
+                            }
                         }
                     };
 
@@ -77620,16 +78050,31 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         }
 
                         console.log("📞 Socket経由でサーバーにICEサーバーの情報を問い合わせています...");
-                        const iceServers = await new Promise((resolve, reject) => {
-                            RiviftConnect.socket.emit('get-ice-servers', {}, (response) => {
-                                if (response.error) {
-                                    reject(new Error(response.error));
-                                } else {
-                                    resolve(response.iceServers);
-                                }
+                        const DEFAULT_STUN = [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            { urls: 'stun:stun2.l.google.com:19302' }
+                        ];
+
+                        let iceServers = DEFAULT_STUN;
+                        try {
+                            iceServers = await new Promise((resolve) => {
+                                if (!RiviftConnect.socket || !RiviftConnect.socket.connected) return resolve(DEFAULT_STUN);
+                                const timer = setTimeout(() => resolve(DEFAULT_STUN), 3000);
+                                RiviftConnect.socket.emit('get-ice-servers', {}, (response) => {
+                                    clearTimeout(timer);
+                                    if (response && Array.isArray(response.iceServers) && response.iceServers.length > 0) {
+                                        resolve(response.iceServers);
+                                    } else {
+                                        resolve(DEFAULT_STUN);
+                                    }
+                                });
                             });
-                        });
-                        console.log("✅ Socket経由でサーバーからICEサーバーの情報を取得しました！:", iceServers);
+                        } catch (e) {
+                            console.warn('着信側ICEサーバー取得フォールバック:', e);
+                            iceServers = DEFAULT_STUN;
+                        }
+                        console.log("✅ ICEサーバー設定完了:", iceServers);
 
                         const configuration = {
                             iceServers: iceServers,
@@ -77672,7 +78117,11 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     remoteVideo.style.display = 'block';
                                 }
                             } else {
-                                appWindow.querySelector('#remote-audio').srcObject = stream;
+                                const remoteAudio = appWindow.querySelector('#remote-audio');
+                                if (remoteAudio) {
+                                    remoteAudio.srcObject = stream;
+                                    remoteAudio.play().catch(e => console.warn('Audio play failed:', e));
+                                }
                             }
                         };
 
@@ -77941,8 +78390,14 @@ RiviftConnect.connectToServer = function () {
 
                     RiviftConnect.socket.on('db_updated_notification', () => {
                         if (RiviftConnect.currentUser) {
-                            RiviftConnect.refreshCurrentUserState();
-                            RiviftConnect.renderAllSidebars();
+                            if (RiviftConnect._dbUpdateDebounceTimer) {
+                                clearTimeout(RiviftConnect._dbUpdateDebounceTimer);
+                            }
+                            RiviftConnect._dbUpdateDebounceTimer = setTimeout(async () => {
+                                RiviftConnect._dbUpdateDebounceTimer = null;
+                                await RiviftConnect.refreshCurrentUserState();
+                                await RiviftConnect.renderAllSidebars();
+                            }, 250);
                         }
                     });
 
@@ -77968,8 +78423,21 @@ RiviftConnect.connectToServer = function () {
                         const { messageId } = payload;
                         const msgDiv = document.querySelector(`[data-message-id="${messageId}"]`);
                         if (msgDiv) {
-                            const bubble = msgDiv.querySelector('.bubble');
-                            if (bubble) bubble.innerHTML = '<i style="opacity:0.5">メッセージが削除されました</i>';
+                            msgDiv.style.transition = 'all 0.22s cubic-bezier(0.4, 0, 0.2, 1)';
+                            msgDiv.style.opacity = '0';
+                            msgDiv.style.transform = 'scale(0.85)';
+                            msgDiv.style.maxHeight = '0px';
+                            msgDiv.style.marginBottom = '0px';
+                            msgDiv.style.overflow = 'hidden';
+                            setTimeout(() => { msgDiv.remove(); }, 220);
+                        }
+                        // キャッシュからも該当メッセージを完全に除外
+                        if (RiviftConnect._messagesCache) {
+                            for (const email in RiviftConnect._messagesCache) {
+                                RiviftConnect._messagesCache[email] = RiviftConnect._messagesCache[email].filter(
+                                    el => el !== msgDiv && el.dataset?.messageId !== messageId
+                                );
+                            }
                         }
                     });
 
@@ -78027,45 +78495,52 @@ RiviftConnect.connectToServer = function () {
 
                         if (callState !== 'incoming') return;
 
-                        appWindow.querySelector('#caller-icon').style.backgroundImage = `url(${callerData.icon || ''})`;
-                        appWindow.querySelector('#caller-name').textContent = callerData.displayName;
+                        const isForeground = RiviftConnect.isWindowOpen && appWindow && document.body.contains(appWindow) && !document.hidden;
 
-                        const callTypeLabel = appWindow.querySelector('#incoming-call-type-label') || appWindow.querySelector('#incoming-call-modal p');
-                        if (callTypeLabel) {
-                            callTypeLabel.textContent = detectedCallType === 'video' ? 'Rivift Connect Video' : 'Rivift Connect Audio';
-                        }
+                        if (isForeground) {
+                            appWindow.querySelector('#caller-icon').style.backgroundImage = `url(${callerData.icon || ''})`;
+                            appWindow.querySelector('#caller-name').textContent = callerData.displayName;
 
-                        appWindow.querySelector('#incoming-call-modal').classList.remove('hidden');
-                        ringtone.play();
+                            const callTypeLabel = appWindow.querySelector('#incoming-call-type-label') || appWindow.querySelector('#incoming-call-modal p');
+                            if (callTypeLabel) {
+                                callTypeLabel.textContent = detectedCallType === 'video' ? 'Rivift Connect Video' : 'Rivift Connect Audio';
+                            }
 
-                        if (detectedCallType === 'video') {
-                            const videoContainer = appWindow.querySelector('#incoming-video-preview-container');
-                            const videoPreview = appWindow.querySelector('#incoming-video-preview');
-                            if (videoContainer && videoPreview) {
-                                videoContainer.classList.remove('hidden');
-                                try {
-                                    const previewStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                                    videoPreview.srcObject = previewStream;
-                                    videoPreview.play().catch(() => { });
-                                    RiviftConnect._incomingPreviewStream = previewStream;
-                                } catch (e) {
-                                    console.warn("着信時ビデオプレビューの起動に失敗:", e);
+                            appWindow.querySelector('#incoming-call-modal').classList.remove('hidden');
+                            ringtone.play().catch(() => {});
+
+                            if (detectedCallType === 'video') {
+                                const videoContainer = appWindow.querySelector('#incoming-video-preview-container');
+                                const videoPreview = appWindow.querySelector('#incoming-video-preview');
+                                if (videoContainer && videoPreview) {
+                                    videoContainer.classList.remove('hidden');
+                                    try {
+                                        const previewStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                                        videoPreview.srcObject = previewStream;
+                                        videoPreview.play().catch(() => { });
+                                        RiviftConnect._incomingPreviewStream = previewStream;
+                                    } catch (e) {
+                                        console.warn("着信時ビデオプレビューの起動に失敗:", e);
+                                    }
                                 }
                             }
-                        }
 
-                        const acceptBtn = appWindow.querySelector('#accept-call-btn');
-                        const acceptIcon = acceptBtn?.querySelector('i');
-                        if (acceptIcon) {
-                            acceptIcon.className = detectedCallType === 'video'
-                                ? 'fas fa-video'
-                                : 'fas fa-phone';
-                        }
-                        if (acceptBtn) acceptBtn.onclick = acceptCall;
+                            const acceptBtn = appWindow.querySelector('#accept-call-btn');
+                            const acceptIcon = acceptBtn?.querySelector('i');
+                            if (acceptIcon) {
+                                acceptIcon.className = detectedCallType === 'video'
+                                    ? 'fas fa-video'
+                                    : 'fas fa-phone';
+                            }
+                            if (acceptBtn) acceptBtn.onclick = acceptCall;
 
-                        appWindow.querySelector('#reject-call-btn').onclick = () => {
-                            endCall(true, "通話を拒否しました");
-                        };
+                            appWindow.querySelector('#reject-call-btn').onclick = () => {
+                                endCall(true, "通話を拒否しました");
+                            };
+                        } else {
+                            // バックグラウンド時：OS着信ポップアップ（浮遊通知）を表示！
+                            showOsCallPopup(payload, callerData, detectedCallType);
+                        }
                     });
 
                     RiviftConnect.socket.on('webrtc-answer', async (payload) => {
@@ -78376,169 +78851,275 @@ RiviftConnect.connectToServer = function () {
                     }
                 };
 
-                RiviftConnect.renderFriendRequests = async function () {
+                RiviftConnect.renderFriendRequests = async function (preloadedUsersData = null) {
                     const requests = RiviftConnect.currentUser.requests || [];
                     RiviftConnect.DOM.requestsBadge.classList.toggle('visible', requests.length > 0);
                     RiviftConnect.DOM.requestsBadge.innerText = requests.length || '';
                     RiviftConnect.DOM.requestList.innerHTML = '';
                     if (requests.length > 0) {
-                        const { usersData } = await RiviftConnect.api('getUsersData', { emails: requests });
+                        let usersData = preloadedUsersData;
+                        if (!usersData) {
+                            const res = await RiviftConnect.api('getUsersData', { emails: requests });
+                            usersData = res?.usersData;
+                        }
                         if (!usersData) return;
+                        if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                        Object.assign(RiviftConnect._usersCache, usersData);
+
                         requests.forEach(fromEmail => {
-                            const userData = usersData[fromEmail];
-                            if (!userData) return;
+                            const userData = usersData[fromEmail] || { displayName: fromEmail };
                             const li = document.createElement('li');
                             const nameSpan = document.createElement('span');
-                            nameSpan.textContent = userData.displayName || fromEmail; // [SEC] XSS対策: textContentで挿入
+                            nameSpan.textContent = userData.displayName || fromEmail;
                             li.appendChild(nameSpan);
                             li.insertAdjacentHTML('beforeend', `<div class="request-actions"><button class="accept-btn" title="承認"><i class="fa-solid fa-circle-check"></i></button><button class="reject-btn" title="拒否"><i class="fa-solid fa-circle-xmark"></i></button></div>`);
-                            li.querySelector('.accept-btn').onclick = () => {
-                                RiviftConnect.socket.emit('accept_friend_request', { from: fromEmail });
+
+                            const acceptBtn = li.querySelector('.accept-btn');
+                            const rejectBtn = li.querySelector('.reject-btn');
+
+                            acceptBtn.onclick = () => {
+                                acceptBtn.disabled = true;
+                                rejectBtn.disabled = true;
+                                acceptBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+                                const normFrom = (fromEmail || '').trim().toLowerCase();
+                                // 楽観的更新
                                 li.remove();
                                 if (RiviftConnect.currentUser?.requests) {
-                                    RiviftConnect.currentUser.requests = RiviftConnect.currentUser.requests.filter(e => e !== fromEmail);
+                                    RiviftConnect.currentUser.requests = RiviftConnect.currentUser.requests.filter(e => (e || '').trim().toLowerCase() !== normFrom);
                                 }
                                 if (!RiviftConnect.currentUser.friends) RiviftConnect.currentUser.friends = [];
-                                if (!RiviftConnect.currentUser.friends.includes(fromEmail)) {
+                                if (!RiviftConnect.currentUser.friends.some(e => (e || '').trim().toLowerCase() === normFrom)) {
                                     RiviftConnect.currentUser.friends.push(fromEmail);
                                 }
-                                RiviftConnect.DOM.requestsBadge.classList.toggle('visible', RiviftConnect.currentUser.requests.length > 0);
-                                RiviftConnect.DOM.requestsBadge.innerText = RiviftConnect.currentUser.requests.length || '';
-                                RiviftConnect.renderContactList({ friends: RiviftConnect.currentUser.friends, requests: RiviftConnect.currentUser.requests, sentRequests: RiviftConnect.currentUser.sentRequests });
+                                const remaining = RiviftConnect.currentUser.requests.length;
+                                RiviftConnect.DOM.requestsBadge.classList.toggle('visible', remaining > 0);
+                                RiviftConnect.DOM.requestsBadge.innerText = remaining || '';
+
+                                RiviftConnect.socket.emit('accept_friend_request', { from: fromEmail }, (res) => {
+                                    if (res && res.error) {
+                                        RiviftConnect.showToast(`承認失敗: ${res.error}`, "error");
+                                    }
+                                });
+                                RiviftConnect.renderContactList();
                             };
-                            li.querySelector('.reject-btn').onclick = () => {
-                                RiviftConnect.socket.emit('reject_friend_request', { from: fromEmail });
+
+                            rejectBtn.onclick = () => {
+                                acceptBtn.disabled = true;
+                                rejectBtn.disabled = true;
+                                const normFrom = (fromEmail || '').trim().toLowerCase();
                                 li.remove();
                                 if (RiviftConnect.currentUser?.requests) {
-                                    RiviftConnect.currentUser.requests = RiviftConnect.currentUser.requests.filter(e => e !== fromEmail);
+                                    RiviftConnect.currentUser.requests = RiviftConnect.currentUser.requests.filter(e => (e || '').trim().toLowerCase() !== normFrom);
                                 }
-                                RiviftConnect.DOM.requestsBadge.classList.toggle('visible', RiviftConnect.currentUser.requests.length > 0);
-                                RiviftConnect.DOM.requestsBadge.innerText = RiviftConnect.currentUser.requests.length || '';
+                                const remaining = RiviftConnect.currentUser.requests.length;
+                                RiviftConnect.DOM.requestsBadge.classList.toggle('visible', remaining > 0);
+                                RiviftConnect.DOM.requestsBadge.innerText = remaining || '';
+
+                                RiviftConnect.socket.emit('reject_friend_request', { from: fromEmail });
                             };
+
                             RiviftConnect.DOM.requestList.appendChild(li);
                         });
                     }
-                }
+                };
 
-                RiviftConnect.renderSentRequests = async function () {
+                RiviftConnect.renderSentRequests = async function (preloadedUsersData = null) {
                     const sentRequests = RiviftConnect.currentUser.sentRequests || [];
                     RiviftConnect.DOM.sentRequestList.innerHTML = '';
                     if (sentRequests.length > 0) {
-                        const { usersData } = await RiviftConnect.api('getUsersData', { emails: sentRequests });
+                        let usersData = preloadedUsersData;
+                        if (!usersData) {
+                            const res = await RiviftConnect.api('getUsersData', { emails: sentRequests });
+                            usersData = res?.usersData;
+                        }
                         if (!usersData) return;
+                        if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                        Object.assign(RiviftConnect._usersCache, usersData);
+
                         sentRequests.forEach(toEmail => {
-                            const userData = usersData[toEmail];
-                            if (!userData) return;
+                            const userData = usersData[toEmail] || { displayName: toEmail };
                             const li = document.createElement('li');
                             const nameSpan = document.createElement('span');
-                            nameSpan.textContent = userData.displayName || toEmail; // [SEC] XSS対策: textContentで挿入
+                            nameSpan.textContent = userData.displayName || toEmail;
                             li.appendChild(nameSpan);
                             li.insertAdjacentHTML('beforeend', `<div class="request-actions"><button class="cancel-btn" title="キャンセル"><i class="fa-solid fa-trash-can"></i></button></div>`);
-                            li.querySelector('.cancel-btn').onclick = () => {
-                                RiviftConnect.socket.emit('cancel_friend_request', { from: RiviftConnect.currentUser.email, to: toEmail });
+
+                            const cancelBtn = li.querySelector('.cancel-btn');
+                            cancelBtn.onclick = () => {
+                                cancelBtn.disabled = true;
+                                const normTo = (toEmail || '').trim().toLowerCase();
                                 li.remove();
                                 if (RiviftConnect.currentUser?.sentRequests) {
-                                    RiviftConnect.currentUser.sentRequests = RiviftConnect.currentUser.sentRequests.filter(e => e !== toEmail);
+                                    RiviftConnect.currentUser.sentRequests = RiviftConnect.currentUser.sentRequests.filter(e => (e || '').trim().toLowerCase() !== normTo);
                                 }
+                                RiviftConnect.socket.emit('cancel_friend_request', { from: RiviftConnect.currentUser.email, to: toEmail });
                             };
                             RiviftConnect.DOM.sentRequestList.appendChild(li);
                         });
                     }
-                }
+                };
 
                 RiviftConnect.renderAllSidebars = async function () {
                     const sidebarData = await RiviftConnect.api('getSidebarData', { email: RiviftConnect.currentUser.email });
                     if (!sidebarData) return;
-                    const { friends, requests, sentRequests } = sidebarData;
+                    const { friends, requests, sentRequests, usersData } = sidebarData;
                     RiviftConnect.currentUser.friends = friends;
                     RiviftConnect.currentUser.requests = requests;
                     RiviftConnect.currentUser.sentRequests = sentRequests;
+
+                    if (usersData) {
+                        if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                        Object.assign(RiviftConnect._usersCache, usersData);
+                    }
+
                     await Promise.all([
                         RiviftConnect.renderContactList(sidebarData),
-                        RiviftConnect.renderFriendRequests(),
-                        RiviftConnect.renderSentRequests()
+                        RiviftConnect.renderFriendRequests(usersData),
+                        RiviftConnect.renderSentRequests(usersData)
                     ]);
-                }
+                };
 
                 RiviftConnect.startConversation = async function (partnerEmail, type, isRefresh = false) {
-                    if (!RiviftConnect.currentUser) return;
+                    if (!RiviftConnect.currentUser || !partnerEmail) return;
+
+                    const currentRequestId = ++RiviftConnect._conversationRequestId;
+                    if (!isRefresh) {
+                        RiviftConnect.activeConversation = { partnerEmail, type };
+                    }
+
+                    // 1. 連絡先リストの選択表示を即時更新 (0ms)
+                    if (RiviftConnect.DOM.contactList) {
+                        RiviftConnect.DOM.contactList.querySelectorAll('li').forEach(li => {
+                            li.classList.toggle('active', li.dataset.email === partnerEmail);
+                        });
+                    }
+
+                    // 2. 未読バッジの即時クリア & 既読通知 (0ms)
+                    RiviftConnect.updateUnreadBadgeOnly(partnerEmail, 0);
+                    RiviftConnect.socket?.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: partnerEmail });
+
+                    // 3. 相手プロフィールの即時反映（キャッシュ優先）
+                    let partnerData = RiviftConnect._usersCache ? RiviftConnect._usersCache[partnerEmail] : null;
+                    if (partnerData) {
+                        RiviftConnect.DOM.chatPartnerDisplayName.innerText = partnerData.displayName || partnerEmail;
+                        RiviftConnect.DOM.chatPartnerIcon.style.backgroundImage = `url(${partnerData.icon || ''})`;
+                        RiviftConnect.switchContentView('conversation-view');
+                    }
+
+                    RiviftConnect._stopTyping();
+                    RiviftConnect._hideTypingIndicator();
+
+                    // 4. メッセージキャッシュがあれば即時表示
+                    const cachedMessages = RiviftConnect._messagesCache ? RiviftConnect._messagesCache[partnerEmail] : null;
+                    if (cachedMessages && cachedMessages.length > 0) {
+                        RiviftConnect.DOM.messages.innerHTML = '';
+                        cachedMessages.forEach(el => RiviftConnect.DOM.messages.appendChild(el));
+                        RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight;
+                    } else {
+                        RiviftConnect.DOM.messages.innerHTML = '<div class="connect-loading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;opacity:.5;font-size:13px;"><i class="fas fa-spinner fa-spin" style="font-size:20px;"></i><span>読み込み中...</span></div>';
+                    }
+
+                    // 5. 相手プロフィールの非同期取得（未キャッシュ時のみ）
+                    if (!partnerData) {
+                        try {
+                            const res = await RiviftConnect.api('getUserData', { email: partnerEmail });
+                            if (RiviftConnect._conversationRequestId !== currentRequestId || RiviftConnect.activeConversation?.partnerEmail !== partnerEmail) {
+                                return; // 別のチャットを開いたため破棄！
+                            }
+                            partnerData = res?.userData;
+                            if (partnerData) {
+                                if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                                RiviftConnect._usersCache[partnerEmail] = partnerData;
+                                RiviftConnect.DOM.chatPartnerDisplayName.innerText = partnerData.displayName || partnerEmail;
+                                RiviftConnect.DOM.chatPartnerIcon.style.backgroundImage = `url(${partnerData.icon || ''})`;
+                                RiviftConnect.switchContentView('conversation-view');
+                            } else {
+                                return RiviftConnect.switchContentView('welcome-view');
+                            }
+                        } catch (e) {
+                            console.error('相手プロフィール取得エラー:', e);
+                        }
+                    }
+
+                    const partnerIcon = partnerData?.icon || '';
+                    const myIcon = RiviftConnect.currentUser.icon || '';
 
                     let isLoadingHistory = false;
                     let hasMoreHistory = true;
                     let currentHistorySkip = 0;
                     const historyLimit = 50;
 
-                    if (!isRefresh) {
-                        RiviftConnect.activeConversation = { partnerEmail, type };
-                    }
-                    const [, { userData: partnerData }] = await Promise.all([
-                        RiviftConnect.renderAllSidebars(),
-                        RiviftConnect.api('getUserData', { email: partnerEmail })
-                    ]);
-                    if (!partnerData) {
-                        return RiviftConnect.switchContentView('welcome-view');
-                    }
-
-                    const partnerIcon = partnerData.icon || '';
-                    const myIcon = RiviftConnect.currentUser.icon || '';
-
-                    RiviftConnect.DOM.chatPartnerDisplayName.innerText = partnerData.displayName;
-                    RiviftConnect.DOM.chatPartnerIcon.style.backgroundImage = `url(${partnerIcon})`;
-                    RiviftConnect.switchContentView('conversation-view');
-                    RiviftConnect.DOM.messages.innerHTML = '<div class="connect-loading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;opacity:.5;font-size:13px;"><i class="fas fa-spinner fa-spin" style="font-size:20px;"></i><span>読み込み中...</span></div>';
-                    RiviftConnect._stopTyping();
-                    RiviftConnect._hideTypingIndicator();
-
                     const loadMoreHistory = async (isInitialLoad = false) => {
                         if (isLoadingHistory || !hasMoreHistory) return;
                         isLoadingHistory = true;
 
-                        const { history } = await RiviftConnect.api('getMessageHistory', {
-                            user1: RiviftConnect.currentUser.email,
-                            user2: partnerEmail,
-                            limit: historyLimit,
-                            skip: currentHistorySkip
-                        });
+                        try {
+                            const res = await RiviftConnect.api('getMessageHistory', {
+                                user1: RiviftConnect.currentUser.email,
+                                user2: partnerEmail,
+                                limit: historyLimit,
+                                skip: currentHistorySkip
+                            });
 
-                        if (history && history.length > 0) {
-                            const currentScrollHeight = isInitialLoad ? 0 : RiviftConnect.DOM.messages.scrollHeight;
-
-                            const fragment = document.createDocumentFragment();
-                            const msgDivs = await Promise.all(history.map(msg => {
-                                const isSentByMe = msg.from === RiviftConnect.currentUser.email;
-                                const iconUrl = isSentByMe ? myIcon : partnerIcon;
-                                return RiviftConnect.createMessageElement(msg.from, msg, iconUrl, isSentByMe ? 'sent' : 'received', msg.read, msg.timestamp, msg.id || msg.timestamp);
-                            }));
-                            if (isInitialLoad) {
-                                RiviftConnect.DOM.messages.innerHTML = '';
+                            // レースコンディション厳格チェック
+                            if (RiviftConnect._conversationRequestId !== currentRequestId || RiviftConnect.activeConversation?.partnerEmail !== partnerEmail) {
+                                return;
                             }
-                            for (const msgDiv of msgDivs) {
-                                fragment.appendChild(msgDiv);
-                            }
-                            RiviftConnect.DOM.messages.prepend(fragment);
 
-                            if (isInitialLoad) {
-                                RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight;
+                            const history = (res?.history || []).filter(msg => msg && msg.type !== 'deleted');
+                            if (history.length > 0) {
+                                const currentScrollHeight = isInitialLoad ? 0 : RiviftConnect.DOM.messages.scrollHeight;
+                                const fragment = document.createDocumentFragment();
+                                const msgDivs = await Promise.all(history.map(msg => {
+                                    const isSentByMe = msg.from === RiviftConnect.currentUser.email;
+                                    const iconUrl = isSentByMe ? myIcon : partnerIcon;
+                                    return RiviftConnect.createMessageElement(msg.from, msg, iconUrl, isSentByMe ? 'sent' : 'received', msg.read, msg.timestamp, msg.id || msg.timestamp);
+                                }));
+
+                                // 復号後にも再度チェック
+                                if (RiviftConnect._conversationRequestId !== currentRequestId || RiviftConnect.activeConversation?.partnerEmail !== partnerEmail) {
+                                    return;
+                                }
+
+                                if (isInitialLoad) {
+                                    RiviftConnect.DOM.messages.innerHTML = '';
+                                }
+                                for (const msgDiv of msgDivs) {
+                                    fragment.appendChild(msgDiv);
+                                }
+                                RiviftConnect.DOM.messages.prepend(fragment);
+
+                                // キャッシュ更新
+                                if (!RiviftConnect._messagesCache) RiviftConnect._messagesCache = {};
+                                RiviftConnect._messagesCache[partnerEmail] = Array.from(RiviftConnect.DOM.messages.children);
+
+                                if (isInitialLoad) {
+                                    RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight;
+                                } else {
+                                    RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight - currentScrollHeight;
+                                }
+
+                                currentHistorySkip += history.length;
+                                if (history.length < historyLimit) {
+                                    hasMoreHistory = false;
+                                }
                             } else {
-                                RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight - currentScrollHeight;
-                            }
-
-                            currentHistorySkip += history.length;
-                            if (history.length < historyLimit) {
                                 hasMoreHistory = false;
+                                if (isInitialLoad && (!cachedMessages || cachedMessages.length === 0)) {
+                                    RiviftConnect.DOM.messages.innerHTML = '';
+                                }
                             }
-                        } else {
-                            hasMoreHistory = false;
-                            if (isInitialLoad) {
-                                RiviftConnect.DOM.messages.innerHTML = '';
-                            }
+                        } catch (err) {
+                            console.error('メッセージ履歴取得エラー:', err);
+                        } finally {
+                            isLoadingHistory = false;
                         }
-                        isLoadingHistory = false;
                     };
 
                     RiviftConnect.DOM.messages.onscroll = () => {
                         if (RiviftConnect.DOM.messages.scrollTop === 0) {
-                            loadMoreHistory();
+                            loadMoreHistory(false);
                         }
                     };
 
@@ -78589,11 +79170,44 @@ RiviftConnect.connectToServer = function () {
                             if (fileData) {
                                 const _eName = (fileData.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                                 const _eType = (fileData.type || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                bubbleContent = `
-                    <a href="#" data-file-url="${fileData.dataUrl}" data-file-name="${_eName}" data-file-type="${_eType}" class="message-file">
+                                const _dUrl = fileData.dataUrl || '';
+
+                                const isImageFile = (fileData.type && fileData.type.startsWith('image/')) ||
+                                    /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(fileData.name || '') ||
+                                    _dUrl.startsWith('data:image/');
+
+                                const isAudioFile = (fileData.type && fileData.type.startsWith('audio/')) ||
+                                    /\.(mp3|wav|m4a|ogg|aac|flac|weba)$/i.test(fileData.name || '') ||
+                                    _dUrl.startsWith('data:audio/');
+
+                                if (isImageFile) {
+                                    bubbleContent = `
+                    <div class="message-image-container" data-file-url="${_dUrl}" data-file-name="${_eName}" data-file-type="${_eType}">
+                        <img src="${_dUrl}" class="message-image" alt="${_eName}">
+                        <div class="message-image-overlay" title="保存"><i class="fas fa-download"></i></div>
+                    </div>`;
+                                } else if (isAudioFile) {
+                                    bubbleContent = `
+                    <div class="message-audio-player" data-file-url="${_dUrl}" data-file-name="${_eName}">
+                        <button class="audio-play-btn" type="button" title="再生"><i class="fas fa-play"></i></button>
+                        <div class="audio-info">
+                            <div class="audio-title" title="${_eName}">${_eName}</div>
+                            <div class="audio-progress-wrap"><div class="audio-progress-bar"></div></div>
+                            <div class="audio-meta-row">
+                                <span class="audio-cur-time">0:00</span>
+                                <span class="audio-duration">--:--</span>
+                            </div>
+                        </div>
+                        <a href="#" class="audio-dl-btn" data-file-url="${_dUrl}" data-file-name="${_eName}" data-file-type="${_eType}" title="ダウンロード"><i class="fas fa-download"></i></a>
+                        <audio src="${_dUrl}" preload="metadata" style="display:none;"></audio>
+                    </div>`;
+                                } else {
+                                    bubbleContent = `
+                    <a href="#" data-file-url="${_dUrl}" data-file-name="${_eName}" data-file-type="${_eType}" class="message-file">
                         <i class="fa-solid fa-file-arrow-down"></i> 
                         <div><strong>${_eName}</strong><br><small>${_eType}</small></div>
                     </a>`;
+                                }
                             } else {
                                 bubbleContent = '[ファイルの復号/表示に失敗]';
                             }
@@ -78604,8 +79218,12 @@ RiviftConnect.connectToServer = function () {
                                 return s.replace(/[<>"'`]/g, c => ({ '<': '%3C', '>': '%3E', '"': '%22', "'": '%27', '`': '%60' }[c]));
                             };
                             const _imgSrc = _safeImgSrc(finalBody.content);
+                            const _imgName = (finalBody.name || 'image.png').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                             bubbleContent = _imgSrc
-                                ? `<img src="${_imgSrc}" class="message-image" alt="添付画像">`
+                                ? `<div class="message-image-container" data-file-url="${_imgSrc}" data-file-name="${_imgName}" data-file-type="image/png">
+                                     <img src="${_imgSrc}" class="message-image" alt="${_imgName}">
+                                     <div class="message-image-overlay" title="保存"><i class="fas fa-download"></i></div>
+                                   </div>`
                                 : '[画像の表示に失敗]';
                         } else if (finalBody.type === 'stamp') {
                             const _safeStampSrc = (s) => {
@@ -78643,6 +79261,128 @@ RiviftConnect.connectToServer = function () {
                             }
                         }
 
+                        // 画像がある吹き出しは背景を透明にしてiMessage風にする
+                        if (msgDiv.querySelector('.message-image-container')) {
+                            const bubbleEl = msgDiv.querySelector('.bubble');
+                            if (bubbleEl) bubbleEl.classList.add('has-image');
+                        }
+
+                        // 画像クリックでのダウンロード・保存
+                        const imgContainer = msgDiv.querySelector('.message-image-container');
+                        if (imgContainer) {
+                            imgContainer.onclick = async (e) => {
+                                e.preventDefault();
+                                const fileName = imgContainer.dataset.fileName || 'image.png';
+                                const fileType = imgContainer.dataset.fileType || 'image/png';
+                                const dataUrl = imgContainer.dataset.fileUrl;
+                                const confirm = await showMessageBox('画像を保存', `「${fileName}」を/Downloadsフォルダに保存しますか？`, { showCancel: true });
+                                if (confirm) {
+                                    try {
+                                        const downloadsFolder = await VFS.readFile('/Downloads');
+                                        if (!downloadsFolder) await VFS.createFolder('/', 'Downloads');
+                                        await VFS.writeFile('/Downloads', fileName, fileType, dataUrl);
+                                        createNotification('保存完了', `「${fileName}」をダウンロードしました。`, 'info');
+                                    } catch (err) {
+                                        createNotification('エラー', `画像の保存に失敗しました: ${err.message}`, 'error');
+                                    }
+                                }
+                            };
+                        }
+
+                        // 音楽プレイヤーの再生/一時停止/シーク/保存制御
+                        const audioPlayer = msgDiv.querySelector('.message-audio-player');
+                        if (audioPlayer) {
+                            const audio = audioPlayer.querySelector('audio');
+                            const playBtn = audioPlayer.querySelector('.audio-play-btn');
+                            const playIcon = playBtn ? playBtn.querySelector('i') : null;
+                            const pBar = audioPlayer.querySelector('.audio-progress-bar');
+                            const pWrap = audioPlayer.querySelector('.audio-progress-wrap');
+                            const curTimeEl = audioPlayer.querySelector('.audio-cur-time');
+                            const durTimeEl = audioPlayer.querySelector('.audio-duration');
+                            const dlBtn = audioPlayer.querySelector('.audio-dl-btn');
+
+                            const formatTime = (sec) => {
+                                if (isNaN(sec) || !isFinite(sec)) return '0:00';
+                                const m = Math.floor(sec / 60);
+                                const s = Math.floor(sec % 60);
+                                return `${m}:${s < 10 ? '0' : ''}${s}`;
+                            };
+
+                            if (audio) {
+                                audio.addEventListener('loadedmetadata', () => {
+                                    if (durTimeEl) durTimeEl.textContent = formatTime(audio.duration);
+                                });
+
+                                audio.addEventListener('timeupdate', () => {
+                                    if (audio.duration && pBar && curTimeEl) {
+                                        const pct = (audio.currentTime / audio.duration) * 100;
+                                        pBar.style.width = `${pct}%`;
+                                        curTimeEl.textContent = formatTime(audio.currentTime);
+                                    }
+                                });
+
+                                audio.addEventListener('ended', () => {
+                                    if (playIcon) playIcon.className = 'fas fa-play';
+                                    if (pBar) pBar.style.width = '0%';
+                                    if (curTimeEl) curTimeEl.textContent = '0:00';
+                                });
+
+                                if (playBtn) {
+                                    playBtn.onclick = (e) => {
+                                        e.stopPropagation();
+                                        if (audio.paused) {
+                                            // 他の再生中音声を一時停止
+                                            document.querySelectorAll('#messages audio').forEach(a => {
+                                                if (a !== audio && !a.paused) {
+                                                    a.pause();
+                                                    const otherBtn = a.parentElement.querySelector('.audio-play-btn i');
+                                                    if (otherBtn) otherBtn.className = 'fas fa-play';
+                                                }
+                                            });
+                                            audio.play();
+                                            if (playIcon) playIcon.className = 'fas fa-pause';
+                                        } else {
+                                            audio.pause();
+                                            if (playIcon) playIcon.className = 'fas fa-play';
+                                        }
+                                    };
+                                }
+
+                                if (pWrap) {
+                                    pWrap.onclick = (e) => {
+                                        e.stopPropagation();
+                                        const rect = pWrap.getBoundingClientRect();
+                                        const clickX = e.clientX - rect.left;
+                                        if (audio.duration && rect.width > 0) {
+                                            audio.currentTime = (clickX / rect.width) * audio.duration;
+                                        }
+                                    };
+                                }
+                            }
+
+                            if (dlBtn) {
+                                dlBtn.onclick = async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const fileName = dlBtn.dataset.fileName;
+                                    const fileType = dlBtn.dataset.fileType || 'audio/mp3';
+                                    const dataUrl = dlBtn.dataset.fileUrl;
+                                    const confirm = await showMessageBox('音声を保存', `「${fileName}」を/Downloadsフォルダに保存しますか？`, { showCancel: true });
+                                    if (confirm) {
+                                        try {
+                                            const downloadsFolder = await VFS.readFile('/Downloads');
+                                            if (!downloadsFolder) await VFS.createFolder('/', 'Downloads');
+                                            await VFS.writeFile('/Downloads', fileName, fileType, dataUrl);
+                                            createNotification('保存完了', `「${fileName}」をダウンロードしました。`, 'info');
+                                        } catch (err) {
+                                            createNotification('エラー', `音声の保存に失敗しました: ${err.message}`, 'error');
+                                        }
+                                    }
+                                };
+                            }
+                        }
+
+                        // 通常ファイルの保存
                         const fileLink = msgDiv.querySelector('.message-file');
                         if (fileLink) {
                             fileLink.onclick = async (e) => {
@@ -78890,8 +79630,21 @@ RiviftConnect.connectToServer = function () {
                                 messageId,
                                 permanent: true, // サーバーDBからも完全削除
                             });
-                            const bubble = msgDiv.querySelector('.bubble');
-                            bubble.innerHTML = '<i style="opacity:0.5">メッセージが削除されました</i>';
+                            // メッセージ要素そのものをアニメーション付きで完全に削除
+                            msgDiv.style.transition = 'all 0.22s cubic-bezier(0.4, 0, 0.2, 1)';
+                            msgDiv.style.opacity = '0';
+                            msgDiv.style.transform = 'scale(0.85)';
+                            msgDiv.style.maxHeight = '0px';
+                            msgDiv.style.marginBottom = '0px';
+                            msgDiv.style.overflow = 'hidden';
+                            setTimeout(() => { msgDiv.remove(); }, 220);
+
+                            // キャッシュからも該当メッセージを完全に除外
+                            if (RiviftConnect._messagesCache && partnerEmail && RiviftConnect._messagesCache[partnerEmail]) {
+                                RiviftConnect._messagesCache[partnerEmail] = RiviftConnect._messagesCache[partnerEmail].filter(
+                                    el => el !== msgDiv && el.dataset?.messageId !== messageId
+                                );
+                            }
                         };
                     });
                 };
@@ -78914,19 +79667,42 @@ RiviftConnect.connectToServer = function () {
 
                     if (!decryptedPayload) return;
 
-                    const isChatOpen = fromEmail === RiviftConnect.activeConversation?.partnerEmail;
+                    const isWindowForeground = RiviftConnect.isWindowOpen && RiviftConnect.appWindow && document.body.contains(RiviftConnect.appWindow) && !document.hidden;
+                    const isChatOpen = isWindowForeground && (fromEmail === RiviftConnect.activeConversation?.partnerEmail);
 
-                    if (isChatOpen) {
-                        const { userData: partnerData } = await RiviftConnect.api('getUserData', { email: fromEmail });
-                        const partnerIcon = partnerData ? partnerData.icon : '';
+                    if (isChatOpen && RiviftConnect.DOM?.messages) {
+                        let partnerData = RiviftConnect._usersCache ? RiviftConnect._usersCache[fromEmail] : null;
+                        if (!partnerData) {
+                            const res = await RiviftConnect.api('getUserData', { email: fromEmail });
+                            partnerData = res?.userData;
+                            if (partnerData) {
+                                if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                                RiviftConnect._usersCache[fromEmail] = partnerData;
+                            }
+                        }
+                        const partnerIcon = partnerData?.icon || '';
 
                         const msgDiv = await RiviftConnect.createMessageElement(fromEmail, decryptedPayload, partnerIcon, 'received', false, payload.timestamp, payload.id || payload.timestamp);
                         RiviftConnect.DOM.messages.appendChild(msgDiv);
                         RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight;
+
+                        // メッセージキャッシュに追加
+                        if (!RiviftConnect._messagesCache) RiviftConnect._messagesCache = {};
+                        if (!RiviftConnect._messagesCache[fromEmail]) RiviftConnect._messagesCache[fromEmail] = [];
+                        RiviftConnect._messagesCache[fromEmail].push(msgDiv);
+
                         RiviftConnect.socket.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: fromEmail });
                     } else {
-                        const { usersData } = await RiviftConnect.api('getUsersData', { emails: [fromEmail] });
-                        const senderName = usersData[fromEmail]?.displayName || fromEmail;
+                        let partnerData = RiviftConnect._usersCache ? RiviftConnect._usersCache[fromEmail] : null;
+                        if (!partnerData) {
+                            const res = await RiviftConnect.api('getUsersData', { emails: [fromEmail] });
+                            partnerData = res?.usersData?.[fromEmail];
+                            if (partnerData) {
+                                if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                                RiviftConnect._usersCache[fromEmail] = partnerData;
+                            }
+                        }
+                        const senderName = partnerData?.displayName || fromEmail;
 
                         let preview;
                         if (decryptedPayload.type === 'text') {
@@ -78945,16 +79721,31 @@ RiviftConnect.connectToServer = function () {
                         escDiv.textContent = preview;
                         const safePreview = escDiv.innerHTML;
 
+                        // 通知音を再生 (/sounds/connect_come.mp3)
+                        try {
+                            const notifAudio = new Audio('/sounds/connect_come.mp3');
+                            notifAudio.play().catch(() => {});
+                        } catch (e) {}
+
+                        // OSデスクトップ通知（クリックでチャットを開くアクションボタン付き）
                         if (typeof window.createNotification === 'function') {
-                            window.createNotification(senderName, safePreview, 'info', undefined, null, null, 'connect');
+                            window.createNotification(
+                                senderName,
+                                safePreview,
+                                'info',
+                                8,
+                                null,
+                                null,
+                                'connect',
+                                { label: 'チャットを開く', onClick: () => { if (typeof window.openConnectApp === 'function') window.openConnectApp(fromEmail); } }
+                            );
                         } else {
                             RiviftConnect.showToast(`新着メッセージ from ${senderName}`, 'info');
                         }
-                        if (RiviftConnect.hasUserInteracted) RiviftConnect.NOTIFICATION_SOUND.play();
                     }
 
-                    const existingLi = RiviftConnect.DOM.contactList?.querySelector(`li[data-email="${CSS.escape(fromEmail)}"]`);
-                    if (!existingLi) {
+                    const existingLi = RiviftConnect.DOM?.contactList?.querySelector(`li[data-email="${CSS.escape(fromEmail)}"]`);
+                    if (!existingLi && RiviftConnect.isWindowOpen) {
                         await RiviftConnect.renderAllSidebars();
                     }
                 };
@@ -78979,13 +79770,42 @@ RiviftConnect.connectToServer = function () {
                     sendBtn.disabled = true;
                     sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
+                    // 送信と同時に入力欄を即時クリア
+                    if (type === 'text' && RiviftConnect.DOM.messageInput) {
+                        RiviftConnect.DOM.messageInput.value = '';
+                    }
+
                     RiviftConnect._stopTyping();
 
                     const partnerEmail = RiviftConnect.activeConversation.partnerEmail;
-                    const { usersData } = await RiviftConnect.api('getUsersData', { emails: [partnerEmail] });
-                    if (!usersData || !usersData[partnerEmail]) return RiviftConnect.showToast("送信先が見つかりません", "error");
 
-                    const recipientPublicKey = await window.crypto.subtle.importKey("jwk", usersData[partnerEmail].publicKeyJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
+                    // 公開鍵キャッシュを活用して高速送信
+                    let recipientPublicKey = RiviftConnect._publicKeysCache ? RiviftConnect._publicKeysCache[partnerEmail] : null;
+                    if (!recipientPublicKey) {
+                        let partnerData = RiviftConnect._usersCache ? RiviftConnect._usersCache[partnerEmail] : null;
+                        if (!partnerData || !partnerData.publicKeyJwk) {
+                            const res = await RiviftConnect.api('getUsersData', { emails: [partnerEmail] });
+                            partnerData = res?.usersData?.[partnerEmail];
+                            if (partnerData) {
+                                if (!RiviftConnect._usersCache) RiviftConnect._usersCache = {};
+                                Object.assign(RiviftConnect._usersCache[partnerEmail] || {}, partnerData);
+                            }
+                        }
+                        if (!partnerData || !partnerData.publicKeyJwk) {
+                            sendBtn.disabled = false;
+                            sendBtn.innerHTML = originalIcon;
+                            return RiviftConnect.showToast("送信先が見つかりません", "error");
+                        }
+                        try {
+                            recipientPublicKey = await window.crypto.subtle.importKey("jwk", partnerData.publicKeyJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
+                            if (!RiviftConnect._publicKeysCache) RiviftConnect._publicKeysCache = {};
+                            RiviftConnect._publicKeysCache[partnerEmail] = recipientPublicKey;
+                        } catch (err) {
+                            sendBtn.disabled = false;
+                            sendBtn.innerHTML = originalIcon;
+                            return RiviftConnect.showToast("暗号化キーの読み込みに失敗しました", "error");
+                        }
+                    }
                     let payloadForDisplay;
                     let messagePayload; // ← 暗黙グローバルを修正: ローカル変数として宣言
 
@@ -78995,6 +79815,8 @@ RiviftConnect.connectToServer = function () {
                         const approxSizeBytes = content.dataUrl ? Math.ceil(content.dataUrl.length * 0.75) : 0;
                         const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4MB
                         if (approxSizeBytes > MAX_FILE_BYTES) {
+                            sendBtn.disabled = false;
+                            sendBtn.innerHTML = originalIcon;
                             return RiviftConnect.showToast(`ファイルが大きすぎます（最大4MB）。選択したファイル: 約${Math.round(approxSizeBytes / 1024 / 1024 * 10) / 10}MB`, 'error');
                         }
 
@@ -79017,6 +79839,8 @@ RiviftConnect.connectToServer = function () {
                         const approxSizeBytes = content.dataUrl ? Math.ceil(content.dataUrl.length * 0.75) : 0;
                         const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB
                         if (approxSizeBytes > MAX_IMAGE_BYTES) {
+                            sendBtn.disabled = false;
+                            sendBtn.innerHTML = originalIcon;
                             return RiviftConnect.showToast(`画像が大きすぎます（最大4MB）。選択した画像: 約${Math.round(approxSizeBytes / 1024 / 1024 * 10) / 10}MB`, 'error');
                         }
                         const imagePayload = { type: 'image', content: content.dataUrl, name: content.name || '', from: RiviftConnect.currentUser.email, replyTo: RiviftConnect._pendingReply || null };
@@ -79058,11 +79882,19 @@ RiviftConnect.connectToServer = function () {
                         RiviftConnect.socket.emit('private_message', msg);
                         const msgDiv = await RiviftConnect.createMessageElement(RiviftConnect.currentUser.email, payloadForDisplay, RiviftConnect.currentUser.icon, 'sent', false, msg.timestamp, msg.id);
 
+                        // 送信アニメーション: ポップインクラスを付与してから追加
+                        msgDiv.classList.add('connect-msg-new');
+                        msgDiv.addEventListener('animationend', () => msgDiv.classList.remove('connect-msg-new'), { once: true });
+
                         RiviftConnect.DOM.messages.appendChild(msgDiv);
                         RiviftConnect.DOM.messages.scrollTop = RiviftConnect.DOM.messages.scrollHeight;
 
+                        if (!RiviftConnect._messagesCache) RiviftConnect._messagesCache = {};
+                        if (!RiviftConnect._messagesCache[partnerEmail]) RiviftConnect._messagesCache[partnerEmail] = [];
+                        RiviftConnect._messagesCache[partnerEmail].push(msgDiv);
+
                         if (type === 'text') {
-                            RiviftConnect.DOM.messageInput.value = '';
+                            // アニメーション開始時に既にクリア済みのため何もしない
                         } else if (type === 'file' || type === 'image') {
                             RiviftConnect.showToast(`「${content.name}」を送信しました`, 'success');
                         }
@@ -79160,7 +79992,19 @@ RiviftConnect.connectToServer = function () {
                     return false;
                 };
 
-                RiviftConnect.initializeAppUI = function () { RiviftConnect.DOM.currentUserDisplayName.innerText = RiviftConnect.currentUser.displayName; RiviftConnect.DOM.currentUserIcon.style.backgroundImage = `url(${RiviftConnect.currentUser.icon || ''})`; RiviftConnect.renderAllSidebars(); RiviftConnect.switchView('main-view'); RiviftConnect.switchContentView('welcome-view'); }
+                RiviftConnect.initializeAppUI = function () {
+                     RiviftConnect.DOM.currentUserDisplayName.innerText = RiviftConnect.currentUser.displayName;
+                     RiviftConnect.DOM.currentUserIcon.style.backgroundImage = `url(${RiviftConnect.currentUser.icon || ''})`;
+                     RiviftConnect.renderAllSidebars();
+                     RiviftConnect.switchView('main-view');
+                     RiviftConnect.switchContentView('welcome-view');
+                     // 通知などから「チャットを開く」で pendingStartEmail がセットされていれば即時遷移
+                     if (RiviftConnect._pendingStartEmail) {
+                         const email = RiviftConnect._pendingStartEmail;
+                         RiviftConnect._pendingStartEmail = null;
+                         setTimeout(() => RiviftConnect.startConversation(email, 'chat'), 0);
+                     }
+                 }
 
                 RiviftConnect.showIconSelectionModal = function (email, displayName, password) {
                     const defaultIcons = [
@@ -79388,16 +80232,27 @@ RiviftConnect.connectToServer = function () {
                 }
 
                 async function handleAddFriend() {
-                    const friendEmail = await showMessageBox('友達を追加', '相手のメールアドレスを入力してください', { showCancel: true, input: { placeholder: 'email@example.com' } });
-                    if (friendEmail) {
+                    const rawEmail = await showMessageBox('友達を追加', '相手のメールアドレスを入力してください', { showCancel: true, input: { placeholder: 'email@example.com' } });
+                    if (rawEmail) {
+                        const friendEmail = rawEmail.trim().toLowerCase();
+                        if (!friendEmail) return;
                         try {
-                            if (friendEmail === RiviftConnect.currentUser.email) throw new Error("自分自身を友達に追加することはできません。");
+                            if (friendEmail === (RiviftConnect.currentUser.email || '').toLowerCase()) {
+                                throw new Error("自分自身を友達に追加することはできません。");
+                            }
                             const { userData } = await RiviftConnect.api('getUserData', { email: friendEmail });
                             if (!userData) throw new Error("そのユーザーは存在しません。");
-                            if (RiviftConnect.currentUser.friends.includes(friendEmail)) throw new Error("既に友達です。");
-                            if (RiviftConnect.currentUser.sentRequests?.includes(friendEmail)) throw new Error("既に申請を送信済みです。");
+                            const curFriends = (RiviftConnect.currentUser.friends || []).map(e => (e || '').toLowerCase());
+                            if (curFriends.includes(friendEmail)) throw new Error("既に友達です。");
+                            const curSent = (RiviftConnect.currentUser.sentRequests || []).map(e => (e || '').toLowerCase());
+                            if (curSent.includes(friendEmail)) throw new Error("既に申請を送信済みです。");
 
-                            RiviftConnect.socket.emit('send_friend_request', { from: RiviftConnect.currentUser.email, to: friendEmail });
+                            RiviftConnect.socket.emit('send_friend_request', { from: RiviftConnect.currentUser.email, to: friendEmail }, (res) => {
+                                if (res && res.error) RiviftConnect.showToast(res.error, "error");
+                            });
+                            if (!RiviftConnect.currentUser.sentRequests) RiviftConnect.currentUser.sentRequests = [];
+                            RiviftConnect.currentUser.sentRequests.push(friendEmail);
+                            RiviftConnect.renderSentRequests();
                             RiviftConnect.showToast(`「${friendEmail}」に友達申請を送信しました。`, "success");
                         } catch (error) {
                             RiviftConnect.showToast(error.message, "error");
@@ -79476,38 +80331,145 @@ RiviftConnect.connectToServer = function () {
                     }
                 };
 
-                RiviftConnect.DOM.currentUserIcon.parentElement.removeEventListener('click', handleProfileEdit);
-                RiviftConnect.DOM.currentUserIcon.parentElement.addEventListener('click', handleProfileEdit);
+                function setupDragAndDropForChat(targetWin) {
+                    if (!targetWin) return;
+                    const conversationView = targetWin.querySelector('#conversation-view');
+                    const dropOverlay = targetWin.querySelector('#connect-drop-overlay');
+                    if (!conversationView || !dropOverlay) return;
 
-                appWindow.querySelector('#start-call-btn').onclick = () => startCall('audio');
-                appWindow.querySelector('#end-call-btn').onclick = endCall;
-                appWindow.querySelector('#mute-btn').onclick = toggleMute;
+                    let dragCounter = 0;
 
-                const startVideoBtn = appWindow.querySelector('#start-video-call-btn');
-                if (startVideoBtn) startVideoBtn.onclick = () => startCall('video');
+                    conversationView.addEventListener('dragenter', (e) => {
+                        e.preventDefault();
+                        dragCounter++;
+                        dropOverlay.style.display = 'flex';
+                    });
 
-                const vcEndBtn = appWindow.querySelector('#vc-end-call');
-                if (vcEndBtn) vcEndBtn.onclick = endCall;
-                const vcMicBtn = appWindow.querySelector('#vc-toggle-mic');
-                if (vcMicBtn) vcMicBtn.onclick = toggleMute;
-                const vcCamBtn = appWindow.querySelector('#vc-toggle-cam');
-                if (vcCamBtn) vcCamBtn.onclick = toggleCamera;
+                    conversationView.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move'; // VFSは effectAllowed='move' で送るため合わせる
+                        dropOverlay.style.display = 'flex';
+                    });
 
-                /*// ミュートボタンの処理（まだ機能はしないけど形だけ）
-                appWindow.querySelector('#mute-btn').onclick = function() {
-                    this.classList.toggle('active');
-                };*/
+                    conversationView.addEventListener('dragleave', (e) => {
+                        dragCounter--;
+                        if (dragCounter <= 0) {
+                            dragCounter = 0;
+                            dropOverlay.style.display = 'none';
+                        }
+                    });
+
+                    conversationView.addEventListener('drop', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dragCounter = 0;
+                        dropOverlay.style.display = 'none';
+
+                        if (!RiviftConnect.activeConversation) {
+                            RiviftConnect.showToast('友達とのチャットを開いてからファイルをドロップしてください', 'warning');
+                            return;
+                        }
+
+                        // 1. Rivift OS ファイルマネージャー（VFS）からのドラッグ＆ドロップ
+                        let riviftPaths = [];
+                        try {
+                            const rawPaths = e.dataTransfer.getData('application/x-rivift-paths');
+                            if (rawPaths) riviftPaths = JSON.parse(rawPaths).filter(p => typeof p === 'string');
+                        } catch {}
+                        if (!riviftPaths.length) {
+                            const single = e.dataTransfer.getData('text/plain');
+                            if (single && single.startsWith('/')) riviftPaths = [single];
+                        }
+
+                        if (riviftPaths.length > 0 && window.VFS) {
+                            for (const path of riviftPaths) {
+                                try {
+                                    const fileItem = await window.VFS.readFile(path);
+                                    if (!fileItem || fileItem.type === 'folder') {
+                                        RiviftConnect.showToast('フォルダは送信できません', 'warning');
+                                        continue;
+                                    }
+                                    const isImg = (fileItem.type && fileItem.type.startsWith('image/')) || /\.(png|jpe?g|gif|webp|svg)$/i.test(fileItem.name || path);
+                                    await RiviftConnect.sendMessage(isImg ? 'image' : 'file', {
+                                        name: fileItem.name || path.split('/').pop(),
+                                        type: fileItem.type || (isImg ? 'image/png' : 'application/octet-stream'),
+                                        dataUrl: fileItem.content
+                                    });
+                                } catch (err) {
+                                    console.error('VFSファイル送信エラー:', err);
+                                    RiviftConnect.showToast(`送信失敗: ${err.message}`, 'error');
+                                }
+                            }
+                            return;
+                        }
+
+                        // 2. 実機（PC外部）からのファイルドロップ
+                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                            for (const file of e.dataTransfer.files) {
+                                const reader = new FileReader();
+                                reader.onload = async (event) => {
+                                    const isImage = typeof file.type === 'string' && file.type.startsWith('image/');
+                                    await RiviftConnect.sendMessage(isImage ? 'image' : 'file', {
+                                        name: file.name,
+                                        type: file.type || (isImage ? 'image/png' : 'application/octet-stream'),
+                                        dataUrl: event.target.result
+                                    });
+                                };
+                                reader.readAsDataURL(file);
+                            }
+                        }
+                    });
+                }
+
+                if (appWindow) {
+                    if (RiviftConnect.DOM.currentUserIcon?.parentElement) {
+                        RiviftConnect.DOM.currentUserIcon.parentElement.removeEventListener('click', handleProfileEdit);
+                        RiviftConnect.DOM.currentUserIcon.parentElement.addEventListener('click', handleProfileEdit);
+                    }
+
+                    const scBtn = appWindow.querySelector('#start-call-btn');
+                    if (scBtn) scBtn.onclick = () => startCall('audio');
+                    const ecBtn = appWindow.querySelector('#end-call-btn');
+                    if (ecBtn) ecBtn.onclick = endCall;
+                    const mBtn = appWindow.querySelector('#mute-btn');
+                    if (mBtn) mBtn.onclick = toggleMute;
+
+                    const startVideoBtn = appWindow.querySelector('#start-video-call-btn');
+                    if (startVideoBtn) startVideoBtn.onclick = () => startCall('video');
+
+                    const vcEndBtn = appWindow.querySelector('#vc-end-call');
+                    if (vcEndBtn) vcEndBtn.onclick = endCall;
+                    const vcMicBtn = appWindow.querySelector('#vc-toggle-mic');
+                    if (vcMicBtn) vcMicBtn.onclick = toggleMute;
+                    const vcCamBtn = appWindow.querySelector('#vc-toggle-cam');
+                    if (vcCamBtn) vcCamBtn.onclick = toggleCamera;
+
+                    setupDragAndDropForChat(appWindow);
+
+                    if (RiviftConnect.currentUser) {
+                        RiviftConnect.initializeAppUI();
+                    }
+                }
 
                 window.RiviftConnect = RiviftConnect;
-                window.VFS = VFS; // ProximityShareなど外部スクリプトからアクセス可能にする
+                window.VFS = VFS;
 
                 if (RiviftConnect.socket) {
                     document.dispatchEvent(new CustomEvent('rivift-connect-ready'));
                 }
 
-                appWindow._RC = RiviftConnect;
-
+                if (appWindow) {
+                    appWindow._RC = RiviftConnect;
+                }
             }
+
+            // Connect バックグラウンドサービスのOS自動起動
+            setTimeout(() => {
+                const token = localStorage.getItem('rivift_auth_token');
+                if (token && (!window.RiviftConnect || !window.RiviftConnect.currentUser)) {
+                    initializeConnectApp(null);
+                }
+            }, 600);
 
             async function initializeMailApp(appWindow) {
                 const RM = {};
