@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.3.6";
+        var CURRENT_FILE_VERSION = "5.3.7";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -16454,6 +16454,35 @@ body.light-mode #ai-selection-panel {
             }
         };
 
+
+        // 旧アカウント移行時、保存済み秘密鍵を復号できる本人だけがパスワード移行できるようにする。
+        // サーバーの公開鍵暗号チャレンジを、復号したRSA秘密鍵で解いて一回限りの証明として返す。
+        window.riviftCreateLegacyMigrationProof = async function(apiBase, email, privateKeyJwk) {
+            const base = String(apiBase || '').replace(/\/+$/, '');
+            const challengeResponse = await fetch(`${base}/auth/migration-challenge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const challengeData = await challengeResponse.json();
+            if (!challengeResponse.ok || !challengeData.challengeId || !challengeData.encryptedChallenge) {
+                throw new Error(challengeData.error || '本人確認を開始できませんでした。');
+            }
+            const privateKey = await crypto.subtle.importKey(
+                'jwk', privateKeyJwk,
+                { name: 'RSA-OAEP', hash: 'SHA-256' },
+                false, ['decrypt']
+            );
+            const binary = atob(challengeData.encryptedChallenge);
+            const encryptedBytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) encryptedBytes[i] = binary.charCodeAt(i);
+            const clearBytes = new Uint8Array(await crypto.subtle.decrypt(
+                { name: 'RSA-OAEP' }, privateKey, encryptedBytes
+            ));
+            const proof = Array.from(clearBytes, b => b.toString(16).padStart(2, '0')).join('');
+            return { challengeId: challengeData.challengeId, proof };
+        };
+
         window.RiviftStorage = {
             _listeners: new Set(),
             get(key, fallback = null) {
@@ -17093,7 +17122,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.6';
+            var RIVIFT_OS_VERSION = '5.3.7';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -25799,7 +25828,8 @@ VFS.init();
                                     if (!privateKeyJwkMigrated) throw new Error('パスワードが正しくありません。');
                                     await window.RiviftSession.saveSession(email, privateKeyJwkMigrated);
                                     submitBtn.textContent = '移行中...';
-                                    const mr = await fetch(`${SERVER_URL}/auth/migrate-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+                                    const migrationProof = await window.riviftCreateLegacyMigrationProof(SERVER_URL, email, privateKeyJwkMigrated);
+                                    const mr = await fetch(`${SERVER_URL}/auth/migrate-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,...migrationProof})});
                                     const md = await mr.json();
                                     if (!mr.ok || !md.token) throw new Error(md.error||'移行に失敗しました。');
                                     tempSettings._riviftToken = md.token;
@@ -44035,7 +44065,8 @@ self.addEventListener("message", function(ev) {
                                                         const privateKeyJwkMig = await window.RiviftSession.decryptWithPassword(pw, userData.encryptedPrivateKeyPayload);
                                                         if (!privateKeyJwkMig) throw new Error('パスワードが正しくありません。');
                                                         btn.textContent = '移行中...';
-                                                        const mr = await fetch(`${SERVER_URL}/auth/migrate-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw})});
+                                                        const migrationProof = await window.riviftCreateLegacyMigrationProof(SERVER_URL, email, privateKeyJwkMig);
+                                                        const mr = await fetch(`${SERVER_URL}/auth/migrate-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,...migrationProof})});
                                                         const md = await mr.json();
                                                         if (!mr.ok || !md.token) throw new Error(md.error||'移行に失敗しました。');
                                                         localStorage.setItem('rivift_auth_token', md.token);
@@ -56019,11 +56050,13 @@ body.mobile-mode .cal-time-col { width:36px; }
                                         const b64ToBuffer = (b64) => { const s = atob(b64); const b = new Uint8Array(s.length); for (let i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return b.buffer; };
                                         const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
                                         const aesKey = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64ToBuffer(enc.salt), iterations: 100000, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
-                                        await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBuffer(enc.iv) }, aesKey, b64ToBuffer(enc.encryptedData));
+                                        const decryptedLegacyKey = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBuffer(enc.iv) }, aesKey, b64ToBuffer(enc.encryptedData));
+                                        const legacyPrivateKeyJwk = JSON.parse(new TextDecoder().decode(decryptedLegacyKey));
+                                        const migrationProof = await window.riviftCreateLegacyMigrationProof(STORE_URL, email, legacyPrivateKeyJwk);
                                         btn.textContent = '移行中...';
                                         const migrateRes = await fetch(`${STORE_URL}/auth/migrate-password`, {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ email, password: pass })
+                                            body: JSON.stringify({ email, password: pass, ...migrationProof })
                                         });
                                         const migrateData = await migrateRes.json();
                                         if (!migrateRes.ok || !migrateData.token) throw new Error(migrateData.error || '移行に失敗しました。');
@@ -66035,7 +66068,7 @@ ${'</' + 'style>'}</head><body>${pagesHtml}</body></html>`);
                             try {
                                 const r = await collabFetch(`/collab/docs/${collabId}/content`, {
                                     method: 'PUT',
-                                    body: JSON.stringify({ title: getTitle(), pageConfig, pages: pages.map(p => p.ce.innerHTML) }),
+                                    body: JSON.stringify({ title: getTitle(), pageConfig, pages: pages.map(p => p.ce.innerHTML), baseRev: Number(cloudRev) || 0 }),
                                 });
                                 cloudRev = r.rev || cloudRev;
                                 if (!cloudDirty) cloudPending = false;
@@ -66045,6 +66078,7 @@ ${'</' + 'style>'}</head><body>${pagesHtml}</body></html>`);
                             } catch (e) {
                                 saveSt.textContent = 'クラウド保存に失敗';
                                 if (e.status === 403) createNotification?.('Rivift Docs', '編集権限がないため、変更はクラウドに保存されません', 'error');
+                                else if (e.status === 409) { cloudPending = false; cloudDirty = false; createNotification?.('Rivift Docs', '他のユーザーが先に保存したよ。最新の内容を読み込み直してから編集を続けてね', 'warning'); }
                             } finally {
                                 cloudSaving = false;
                                 if (cloudDirty) scheduleCloudSave();
@@ -66064,6 +66098,7 @@ ${'</' + 'style>'}</head><body>${pagesHtml}</body></html>`);
                         const fetchServerContent = async () => {
                             try {
                                 const r = await collabFetch(`/collab/docs/${collabId}/content`);
+                                cloudRev = Number.isSafeInteger(r.rev) ? r.rev : 0;
                                 return r.content ? { ...r.content, rev: r.rev } : null;
                             } catch (e) { return null; }
                         };
@@ -79761,9 +79796,10 @@ RiviftConnect.connectToServer = function () {
                                 RiviftConnect._authToken = freshToken;
                             } else {
                                 try {
+                                    const migrationProof = await window.riviftCreateLegacyMigrationProof(SERVER_URL, email, privateKeyJwk);
                                     const mr = await fetch(`${SERVER_URL}/auth/migrate-password`, {
                                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ email, password })
+                                        body: JSON.stringify({ email, password, ...migrationProof })
                                     });
                                     const md = await mr.json();
                                     if (mr.ok && md.token) {
