@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.3.7";
+        var CURRENT_FILE_VERSION = "5.3.8";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -16436,6 +16436,48 @@ body.light-mode #ai-selection-panel {
     </div>
 
     <script>
+        /* ===== Rivift stability layer (auto-inserted) ===== */
+        (function () {
+            if (window.__riviftStability) return;
+            var diag = { errors: [], initFailures: [], corruptedKeys: [] };
+            window.__riviftStability = diag;
+            window.RiviftDiagnostics = diag;
+            function push(arr, item) { arr.push(item); if (arr.length > 100) arr.shift(); }
+            function msgOf(e) {
+                try { return (e && e.message) ? String(e.message) : String(e); } catch (_) { return 'unknown'; }
+            }
+            // 起動ステップ単位の失敗を記録(他のステップは継続して実行される)
+            window.__riviftInitFail = function (label, err) {
+                push(diag.initFailures, { label: label, message: msgOf(err), time: Date.now() });
+                try { console.error('[Rivift OS] 初期化ステップが失敗しましたが起動を継続します:', label, err); } catch (_) {}
+            };
+            // 壊れた保存データでも例外にしない JSON.parse(localStorage.getItem(..)) の代替
+            window.__lsParse = function (raw, fallback) {
+                var hasDef = arguments.length > 1;
+                if (raw === null || raw === undefined || (hasDef && raw === '')) return hasDef ? fallback : null;
+                try { return JSON.parse(raw); } catch (e) {
+                    push(diag.corruptedKeys, { sample: String(raw).slice(0, 60), message: msgOf(e), time: Date.now() });
+                    try { console.warn('[Rivift OS] 保存データの解析に失敗したため既定値を使用します:', String(raw).slice(0, 60)); } catch (_) {}
+                    return hasDef ? fallback : null;
+                }
+            };
+            var warned = 0;
+            function report(kind, message, extra) {
+                push(diag.errors, { kind: kind, message: message, extra: extra || '', time: Date.now() });
+                if (warned++ < 30) { try { console.warn('[Rivift OS] ' + kind + ':', message, extra || ''); } catch (_) {} }
+            }
+            window.addEventListener('error', function (ev) {
+                var m = (ev && ev.message) ? String(ev.message) : '';
+                if (m.indexOf('ResizeObserver loop') !== -1) return;
+                report('uncaught', m || 'unknown', ev && ev.filename ? (ev.filename + ':' + ev.lineno + ':' + ev.colno) : '');
+            });
+            window.addEventListener('unhandledrejection', function (ev) {
+                var r = ev && ev.reason;
+                report('unhandledrejection', msgOf(r), r && r.stack ? String(r.stack).split('\n').slice(0, 2).join(' | ') : '');
+            });
+        })();
+        /* ===== /Rivift stability layer ===== */
+
 
         window.escapeHtml = function(val) {
             if (val === null || val === undefined) return '';
@@ -17122,7 +17164,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.7';
+            var RIVIFT_OS_VERSION = '5.3.8';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -18164,9 +18206,11 @@ body.light-mode #ai-selection-panel {
             }
 
         document.addEventListener('DOMContentLoaded', (event) => {
-            if (window.__RIVIFT_BOOTING_UPDATE__) return;
+            try { if (window.__RIVIFT_BOOTING_UPDATE__) return;
+} catch (__riviftErr) { __riviftInitFail("L18167 If: if (window.__RIVIFT_BOOTING_UPDATE__) return;", __riviftErr); }
 
-            if (typeof applyStaticI18n === 'function') applyStaticI18n();
+            try { if (typeof applyStaticI18n === 'function') applyStaticI18n();
+} catch (__riviftErr) { __riviftInitFail("L18169 If: if (typeof applyStaticI18n === 'function') applyStaticI18n()", __riviftErr); }
 
             class RiviftWorker {
                 constructor(code) {
@@ -18367,11 +18411,14 @@ body.light-mode #ai-selection-panel {
                 }
             }
 
-            const globalWorkerPool = new RiviftWorkerPool(2);
-            window.RiviftWorkerPool = globalWorkerPool;
-            window.runInWorker = (fn, ...args) => globalWorkerPool.runFunction(fn, args);
+            let globalWorkerPool; try { globalWorkerPool = new RiviftWorkerPool(2);
+} catch (__riviftErr) { __riviftInitFail("L18370 const: const globalWorkerPool = new RiviftWorkerPool(2);", __riviftErr); }
+            try { window.RiviftWorkerPool = globalWorkerPool;
+} catch (__riviftErr) { __riviftInitFail("L18371 Expression: window.RiviftWorkerPool = globalWorkerPool;", __riviftErr); }
+            try { window.runInWorker = (fn, ...args) => globalWorkerPool.runFunction(fn, args);
+} catch (__riviftErr) { __riviftInitFail("L18372 Expression: window.runInWorker = (fn, ...args) => globalWorkerPool.runFu", __riviftErr); }
 
-            const AppWorkerRuntime = (() => {
+            let AppWorkerRuntime; try { AppWorkerRuntime = (() => {
 
                 const _nativeSetInterval          = window.setInterval.bind(window);
                 const _nativeClearInterval        = window.clearInterval.bind(window);
@@ -18902,9 +18949,11 @@ body.light-mode #ai-selection-panel {
                     },
                 };
             })();
-            window.AppWorkerRuntime = AppWorkerRuntime;
+} catch (__riviftErr) { __riviftInitFail("L18374 const: const AppWorkerRuntime = (() => { const _nativeSetInterval =", __riviftErr); }
+            try { window.AppWorkerRuntime = AppWorkerRuntime;
+} catch (__riviftErr) { __riviftInitFail("L18905 Expression: window.AppWorkerRuntime = AppWorkerRuntime;", __riviftErr); }
 
-            const MemoryManager = (() => {
+            let MemoryManager; try { MemoryManager = (() => {
 
                 const BYTES_PER_DOM_NODE = 900;
                 const CANVAS_BUFFER_MULTIPLIER = 1.5;
@@ -18930,7 +18979,7 @@ body.light-mode #ai-selection-panel {
 
                 function _loadSettings() {
                     try {
-                        const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+                        const raw = __lsParse(localStorage.getItem(SETTINGS_KEY), null);
                         if (raw) {
                             _limitMB = typeof raw.limitMB === 'number' ? raw.limitMB : null;
                             _autoSuspendEnabled = raw.autoSuspend !== false;
@@ -19269,9 +19318,11 @@ body.light-mode #ai-selection-panel {
                     purgeWindowCache,
                 };
             })();
-            window.MemoryManager = MemoryManager;
+} catch (__riviftErr) { __riviftInitFail("L18907 const: const MemoryManager = (() => { const BYTES_PER_DOM_NODE = 90", __riviftErr); }
+            try { window.MemoryManager = MemoryManager;
+} catch (__riviftErr) { __riviftInitFail("L19272 Expression: window.MemoryManager = MemoryManager;", __riviftErr); }
 
-            const FrameMonitor = (() => {
+            let FrameMonitor; try { FrameMonitor = (() => {
                 const IDEAL_FRAME_MS = 1000 / 60;
                 const SAMPLE_WINDOW = 60; // 直近60フレーム分を保持
 
@@ -19328,9 +19379,11 @@ body.light-mode #ai-selection-panel {
 
                 return { start, stop, getReport };
             })();
-            window.FrameMonitor = FrameMonitor;
+} catch (__riviftErr) { __riviftInitFail("L19274 const: const FrameMonitor = (() => { const IDEAL_FRAME_MS = 1000 / ", __riviftErr); }
+            try { window.FrameMonitor = FrameMonitor;
+} catch (__riviftErr) { __riviftInitFail("L19331 Expression: window.FrameMonitor = FrameMonitor;", __riviftErr); }
 
-            const CryptoVault = (() => {
+            let CryptoVault; try { CryptoVault = (() => {
                 const ALGO = 'AES-GCM';
                 const SALT_KEY = 'riviftCryptoSalt';
                 const ITER = 100000;
@@ -19403,6 +19456,7 @@ body.light-mode #ai-selection-panel {
 
                 return { encrypt, decrypt, encryptArray, decryptArray };
             })();
+} catch (__riviftErr) { __riviftInitFail("L19333 const: const CryptoVault = (() => { const ALGO = 'AES-GCM'; const S", __riviftErr); }
 
             const VFS_WORKER_CODE = `
 const VFS = {
@@ -20325,12 +20379,18 @@ VFS.init();
   };
 `;
 
-            const dynamicWallpaperContainer = document.getElementById('dynamic-wallpaper-container');
-            const skyCanvas = document.getElementById('sky-canvas');
-            const landscapeCanvas = document.getElementById('landscape-canvas');
-            const cloudsContainer = document.getElementById('clouds-container');
-            const skyCtx = skyCanvas.getContext('2d');
-            const landscapeCtx = landscapeCanvas.getContext('2d');
+            let dynamicWallpaperContainer; try { dynamicWallpaperContainer = document.getElementById('dynamic-wallpaper-container');
+} catch (__riviftErr) { __riviftInitFail("L20328 const: const dynamicWallpaperContainer = document.getElementById('d", __riviftErr); }
+            let skyCanvas; try { skyCanvas = document.getElementById('sky-canvas');
+} catch (__riviftErr) { __riviftInitFail("L20329 const: const skyCanvas = document.getElementById('sky-canvas');", __riviftErr); }
+            let landscapeCanvas; try { landscapeCanvas = document.getElementById('landscape-canvas');
+} catch (__riviftErr) { __riviftInitFail("L20330 const: const landscapeCanvas = document.getElementById('landscape-c", __riviftErr); }
+            let cloudsContainer; try { cloudsContainer = document.getElementById('clouds-container');
+} catch (__riviftErr) { __riviftInitFail("L20331 const: const cloudsContainer = document.getElementById('clouds-cont", __riviftErr); }
+            let skyCtx; try { skyCtx = skyCanvas.getContext('2d');
+} catch (__riviftErr) { __riviftInitFail("L20332 const: const skyCtx = skyCanvas.getContext('2d');", __riviftErr); }
+            let landscapeCtx; try { landscapeCtx = landscapeCanvas.getContext('2d');
+} catch (__riviftErr) { __riviftInitFail("L20333 const: const landscapeCtx = landscapeCanvas.getContext('2d');", __riviftErr); }
 
             let dynamicWallpaperAnimationId = null;
             let dynamicWallpaperFixedTime = null;
@@ -20577,7 +20637,8 @@ VFS.init();
                 }
             }
 
-            const depthWallpaperContainer = document.getElementById('depth-wallpaper-container');
+            let depthWallpaperContainer; try { depthWallpaperContainer = document.getElementById('depth-wallpaper-container');
+} catch (__riviftErr) { __riviftInitFail("L20580 const: const depthWallpaperContainer = document.getElementById('dep", __riviftErr); }
             let depthWallpaperMoveHandler = null;
             let depthShootingStarTimer = null;
 
@@ -21124,8 +21185,9 @@ VFS.init();
                 return `rgb(${Math.max(0,+match[1]+amount)},${Math.max(0,+match[2]+amount)},${Math.max(0,+match[3]+amount)})`;
             }
 
-            const savedWallpaperModeAtBoot = localStorage.getItem('riviftWallpaperMode') || (localStorage.getItem('riviftCurrentWallpaper') === 'city-live' ? 'city' : 'static');
-            setTimeout(() => {
+            let savedWallpaperModeAtBoot; try { savedWallpaperModeAtBoot = localStorage.getItem('riviftWallpaperMode') || (localStorage.getItem('riviftCurrentWallpaper') === 'city-live' ? 'city' : 'static');
+} catch (__riviftErr) { __riviftInitFail("L21127 const: const savedWallpaperModeAtBoot = localStorage.getItem('rivif", __riviftErr); }
+            try { setTimeout(() => {
                 if (typeof restoreCurrentWallpaper === 'function') {
                     restoreCurrentWallpaper(false);
                 } else {
@@ -21140,6 +21202,7 @@ VFS.init();
                     }
                 }
             }, 60);
+} catch (__riviftErr) { __riviftInitFail("L21128 Expression: setTimeout(() => { if (typeof restoreCurrentWallpaper === 'f", __riviftErr); }
 
             function createCloud() {
                 if (dynamicWallpaperContainer.style.display === 'none') return;
@@ -21186,9 +21249,12 @@ VFS.init();
                 if (typeof updatePanelPositions === 'function') updatePanelPositions();
             }
 
-            const allAppsFullscreen = document.getElementById('all-apps-fullscreen');
-            const allAppsGridContainer = document.getElementById('all-apps-grid-container');
-            const allAppsPagination = document.getElementById('all-apps-pagination');
+            let allAppsFullscreen; try { allAppsFullscreen = document.getElementById('all-apps-fullscreen');
+} catch (__riviftErr) { __riviftInitFail("L21189 const: const allAppsFullscreen = document.getElementById('all-apps-", __riviftErr); }
+            let allAppsGridContainer; try { allAppsGridContainer = document.getElementById('all-apps-grid-container');
+} catch (__riviftErr) { __riviftInitFail("L21190 const: const allAppsGridContainer = document.getElementById('all-ap", __riviftErr); }
+            let allAppsPagination; try { allAppsPagination = document.getElementById('all-apps-pagination');
+} catch (__riviftErr) { __riviftInitFail("L21191 const: const allAppsPagination = document.getElementById('all-apps-", __riviftErr); }
             const allAppsScrollHandler = () => {
                 if (allAppsGridContainer.clientWidth === 0) return;
                 const currentPage = Math.round(allAppsGridContainer.scrollLeft / allAppsGridContainer.clientWidth);
@@ -21207,12 +21273,17 @@ VFS.init();
                     behavior: 'smooth'
                 });
             };
-            allAppsGridContainer.addEventListener('scroll', allAppsScrollHandler);
-            allAppsFullscreen.addEventListener('wheel', allAppsWheelHandler, { passive: false });
+            try { allAppsGridContainer.addEventListener('scroll', allAppsScrollHandler);
+} catch (__riviftErr) { __riviftInitFail("L21210 Expression: allAppsGridContainer.addEventListener('scroll', allAppsScrol", __riviftErr); }
+            try { allAppsFullscreen.addEventListener('wheel', allAppsWheelHandler, { passive: false });
+} catch (__riviftErr) { __riviftInitFail("L21211 Expression: allAppsFullscreen.addEventListener('wheel', allAppsWheelHand", __riviftErr); }
 
-            const taskbarCenter = document.getElementById('taskbar-center');
-            const hintLeft = document.getElementById('taskbar-scroll-hint-left');
-            const hintRight = document.getElementById('taskbar-scroll-hint-right');
+            let taskbarCenter; try { taskbarCenter = document.getElementById('taskbar-center');
+} catch (__riviftErr) { __riviftInitFail("L21213 const: const taskbarCenter = document.getElementById('taskbar-cente", __riviftErr); }
+            let hintLeft; try { hintLeft = document.getElementById('taskbar-scroll-hint-left');
+} catch (__riviftErr) { __riviftInitFail("L21214 const: const hintLeft = document.getElementById('taskbar-scroll-hin", __riviftErr); }
+            let hintRight; try { hintRight = document.getElementById('taskbar-scroll-hint-right');
+} catch (__riviftErr) { __riviftInitFail("L21215 const: const hintRight = document.getElementById('taskbar-scroll-hi", __riviftErr); }
 
             function checkTaskbarScroll() {
                 const taskbarCenter = document.getElementById('taskbar-center');
@@ -21243,25 +21314,35 @@ VFS.init();
                 taskbarCenter.style.setProperty('--mask-end-percent', atEnd ? '100%' : '95%');
             }
 
-            taskbarCenter.addEventListener('wheel', (event) => {
+            try { taskbarCenter.addEventListener('wheel', (event) => {
                 event.preventDefault();
                 taskbarCenter.scrollLeft += event.deltaY;
             }, { passive: false });
-            taskbarCenter.addEventListener('scroll', checkTaskbarScroll, { passive: true });
-            taskbarCenter.addEventListener('dragover', handleTaskbarDragOver);
-            taskbarCenter.addEventListener('drop', handleTaskbarDrop);
-            window.addEventListener('resize', checkTaskbarScroll);
-            const observer = new MutationObserver(() => {
+} catch (__riviftErr) { __riviftInitFail("L21246 Expression: taskbarCenter.addEventListener('wheel', (event) => { event.p", __riviftErr); }
+            try { taskbarCenter.addEventListener('scroll', checkTaskbarScroll, { passive: true });
+} catch (__riviftErr) { __riviftInitFail("L21250 Expression: taskbarCenter.addEventListener('scroll', checkTaskbarScroll,", __riviftErr); }
+            try { taskbarCenter.addEventListener('dragover', handleTaskbarDragOver);
+} catch (__riviftErr) { __riviftInitFail("L21251 Expression: taskbarCenter.addEventListener('dragover', handleTaskbarDrag", __riviftErr); }
+            try { taskbarCenter.addEventListener('drop', handleTaskbarDrop);
+} catch (__riviftErr) { __riviftInitFail("L21252 Expression: taskbarCenter.addEventListener('drop', handleTaskbarDrop);", __riviftErr); }
+            try { window.addEventListener('resize', checkTaskbarScroll);
+} catch (__riviftErr) { __riviftInitFail("L21253 Expression: window.addEventListener('resize', checkTaskbarScroll);", __riviftErr); }
+            let observer; try { observer = new MutationObserver(() => {
                 requestAnimationFrame(checkTaskbarScroll);
             });
-            observer.observe(taskbarCenter, { childList: true, subtree: true });
-            setTimeout(checkTaskbarScroll, 500);
+} catch (__riviftErr) { __riviftInitFail("L21254 const: const observer = new MutationObserver(() => { requestAnimati", __riviftErr); }
+            try { observer.observe(taskbarCenter, { childList: true, subtree: true });
+} catch (__riviftErr) { __riviftInitFail("L21257 Expression: observer.observe(taskbarCenter, { childList: true, subtree: ", __riviftErr); }
+            try { setTimeout(checkTaskbarScroll, 500);
+} catch (__riviftErr) { __riviftInitFail("L21258 Expression: setTimeout(checkTaskbarScroll, 500);", __riviftErr); }
 
             let bootRepairReport = null;
 
             let faceMatcher = null;
-            let isFaceAuthEnabled = JSON.parse(localStorage.getItem('riviftFaceAuthEnabled')) || false;
-            let isFaceLivenessEnabled = JSON.parse(localStorage.getItem('riviftFaceLivenessEnabled')) ?? true; // 生体検知(なりすまし写真防止)
+            let isFaceAuthEnabled; try { isFaceAuthEnabled = __lsParse(localStorage.getItem('riviftFaceAuthEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L21263 let: let isFaceAuthEnabled = __lsParse(localStorage.getItem('rivi", __riviftErr); }
+            let isFaceLivenessEnabled; try { isFaceLivenessEnabled = __lsParse(localStorage.getItem('riviftFaceLivenessEnabled')) ?? true;
+} catch (__riviftErr) { __riviftInitFail("L21264 let: let isFaceLivenessEnabled = __lsParse(localStorage.getItem('", __riviftErr); } // 生体検知(なりすまし写真防止)
             let isFaceModelsLoaded = false;
             let faceAuthStream = null;
             let currentVideoTrack = null;
@@ -21504,7 +21585,7 @@ VFS.init();
                 },
             };
 
-            ;(() => {
+            ;try { (() => {
                 const _wrap = (methodName, getParent) => {
                     const orig = VFS[methodName].bind(VFS);
                     VFS[methodName] = async function (...args) {
@@ -21528,8 +21609,10 @@ VFS.init();
                     return p.substring(0, p.lastIndexOf('/')) || '/';
                 });
             })();
+} catch (__riviftErr) { __riviftInitFail("L21507 Expression: (() => { const _wrap = (methodName, getParent) => { const or", __riviftErr); }
 
-            window.VFS = VFS;
+            try { window.VFS = VFS;
+} catch (__riviftErr) { __riviftInitFail("L21532 Expression: window.VFS = VFS;", __riviftErr); }
 
             async function gatherAllOSData() {
                 RiviftLogger.log("OSデータの収集を開始...");
@@ -21900,7 +21983,7 @@ VFS.init();
                     return;
                 }
 
-                const savedDescriptor = JSON.parse(localStorage.getItem('riviftFaceDescriptor'));
+                const savedDescriptor = __lsParse(localStorage.getItem('riviftFaceDescriptor'));
                 if (!savedDescriptor) {
                     showPasswordInput();
                     return;
@@ -21923,7 +22006,7 @@ VFS.init();
                     return;
                 }
 
-                const savedSamples = JSON.parse(localStorage.getItem('riviftFaceDescriptorSamples') || '[]');
+                const savedSamples = __lsParse(localStorage.getItem('riviftFaceDescriptorSamples'), []);
                 const descriptorsToMatch = [Float32Array.from(savedDescriptor)];
                 if (Array.isArray(savedSamples)) {
                     savedSamples.forEach(s => { if (Array.isArray(s)) descriptorsToMatch.push(Float32Array.from(s)); });
@@ -22645,15 +22728,17 @@ VFS.init();
                 await wait(400);
             }
 
-            const osContainer = document.getElementById('rivift-os-container');
-            osContainer.style.opacity = '0';
+            let osContainer; try { osContainer = document.getElementById('rivift-os-container');
+} catch (__riviftErr) { __riviftInitFail("L22648 const: const osContainer = document.getElementById('rivift-os-conta", __riviftErr); }
+            try { osContainer.style.opacity = '0';
+} catch (__riviftErr) { __riviftInitFail("L22649 Expression: osContainer.style.opacity = '0';", __riviftErr); }
             const SERVER_URL = "https://rivift-connect-server-v2.onrender.com";
             const PROXY_URL = "https://rivift-proxy.tanakarei-itoshima.workers.dev";
             // ブラウザアプリがプロキシ経由で取得したデータ量をこの端末側で計測する
-            window.RiviftTraffic = (() => {
+            try { window.RiviftTraffic = (() => {
                 const KEY = 'riviftBrowserTraffic';
                 const fresh = () => ({ bytes: 0, requests: 0, since: Date.now() });
-                const load = () => { try { return Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch (_) { return fresh(); } };
+                const load = () => { try { return Object.assign(fresh(), __lsParse(localStorage.getItem(KEY)) || {}); } catch (_) { return fresh(); } };
                 let d = load();
                 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (_) { } };
                 return {
@@ -22673,8 +22758,9 @@ VFS.init();
                     }
                 };
             })();
+} catch (__riviftErr) { __riviftInitFail("L22653 Expression: window.RiviftTraffic = (() => { const KEY = 'riviftBrowserTr", __riviftErr); }
 
-            window.RiviftSession = (() => {
+            try { window.RiviftSession = (() => {
                 const _SESSION_DB = 'RiviftConnectSession';
                 const _SESSION_STORE = 'session';
 
@@ -22772,8 +22858,9 @@ VFS.init();
 
                 return { saveSession, loadSession, clearSession, decryptWithPassword };
             })();
+} catch (__riviftErr) { __riviftInitFail("L22677 Expression: window.RiviftSession = (() => { const _SESSION_DB = 'RiviftC", __riviftErr); }
 
-            window.RiviftMailCrypto = (() => {
+            try { window.RiviftMailCrypto = (() => {
                 const bufToB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
                 const b64ToBuf = (b64) => { const s = atob(b64); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b.buffer; };
 
@@ -22826,6 +22913,7 @@ VFS.init();
 
                 return { encryptMail, decryptMail };
             })();
+} catch (__riviftErr) { __riviftInitFail("L22776 Expression: window.RiviftMailCrypto = (() => { const bufToB64 = (buf) =>", __riviftErr); }
             const getIconForType = (type) => {
                 if (!type) return 'fas fa-file text-slate-400 drop-shadow-sm';
                 if (type === 'folder') return 'fas fa-folder text-blue-400 drop-shadow-sm';
@@ -22848,7 +22936,8 @@ VFS.init();
                 purple: { label: 'パープル', hex: '#c084fc' },
                 gray: { label: 'グレー', hex: '#9ca3af' },
             };
-            let folderColorMap = JSON.parse(localStorage.getItem('riviftFolderColors')) || {};
+            let folderColorMap; try { folderColorMap = __lsParse(localStorage.getItem('riviftFolderColors')) || {};
+} catch (__riviftErr) { __riviftInitFail("L22851 let: let folderColorMap = __lsParse(localStorage.getItem('riviftF", __riviftErr); }
             function getFolderColor(path) { return folderColorMap[path] || null; }
             function setFolderColor(path, colorKey) {
                 if (colorKey) folderColorMap[path] = colorKey;
@@ -22992,7 +23081,8 @@ VFS.init();
                 }
                 return null;
             }
-            let folderBadgeMap = JSON.parse(localStorage.getItem('riviftFolderBadges')) || {};
+            let folderBadgeMap; try { folderBadgeMap = __lsParse(localStorage.getItem('riviftFolderBadges')) || {};
+} catch (__riviftErr) { __riviftInitFail("L22995 let: let folderBadgeMap = __lsParse(localStorage.getItem('riviftF", __riviftErr); }
             function getFolderBadge(path, folderName) {
                 const explicit = folderBadgeMap[path];
                 if (explicit === 'none') return null;
@@ -23038,56 +23128,98 @@ VFS.init();
                 const toHex = v => Math.round(v * 255).toString(16).padStart(2, '0');
                 return `#${toHex(rr)}${toHex(gg)}${toHex(bb)}`;
             }
-            const desktop = document.getElementById('desktop');
-            const taskbar = document.getElementById('taskbar');
-            const currentTimeDisplay = document.getElementById('current-time');
-            const dateDisplay = document.getElementById('date-display');
-            const quickSettingsPanel = document.getElementById('quick-settings');
-            const startMenuPanel = document.getElementById('start-menu');
-            const menuButton = document.getElementById('menu-button');
-            const allAppsButton = document.getElementById('all-apps-button');
-            const allAppsGrid = document.getElementById('all-apps-grid');
-            const allAppsSearchBar = document.getElementById('all-apps-search-bar');
-            const exitAllAppsButton = document.getElementById('exit-all-apps');
-            const selectPinAppsButton = document.getElementById('select-pin-apps-button');
-            const messageBoxOverlay = document.getElementById('message-box-overlay');
-            const messageBoxTitle = document.getElementById('message-box-title');
-            const messageBoxContent = document.getElementById('message-box-content');
-            const messageBoxCustomContent = document.getElementById('message-box-custom-content');
-            let messageBoxOk = document.getElementById('message-box-ok');
-            let messageBoxCancel = document.getElementById('message-box-cancel');
+            let desktop; try { desktop = document.getElementById('desktop');
+} catch (__riviftErr) { __riviftInitFail("L23041 const: const desktop = document.getElementById('desktop');", __riviftErr); }
+            let taskbar; try { taskbar = document.getElementById('taskbar');
+} catch (__riviftErr) { __riviftInitFail("L23042 const: const taskbar = document.getElementById('taskbar');", __riviftErr); }
+            let currentTimeDisplay; try { currentTimeDisplay = document.getElementById('current-time');
+} catch (__riviftErr) { __riviftInitFail("L23043 const: const currentTimeDisplay = document.getElementById('current-", __riviftErr); }
+            let dateDisplay; try { dateDisplay = document.getElementById('date-display');
+} catch (__riviftErr) { __riviftInitFail("L23044 const: const dateDisplay = document.getElementById('date-display');", __riviftErr); }
+            let quickSettingsPanel; try { quickSettingsPanel = document.getElementById('quick-settings');
+} catch (__riviftErr) { __riviftInitFail("L23045 const: const quickSettingsPanel = document.getElementById('quick-se", __riviftErr); }
+            let startMenuPanel; try { startMenuPanel = document.getElementById('start-menu');
+} catch (__riviftErr) { __riviftInitFail("L23046 const: const startMenuPanel = document.getElementById('start-menu')", __riviftErr); }
+            let menuButton; try { menuButton = document.getElementById('menu-button');
+} catch (__riviftErr) { __riviftInitFail("L23047 const: const menuButton = document.getElementById('menu-button');", __riviftErr); }
+            let allAppsButton; try { allAppsButton = document.getElementById('all-apps-button');
+} catch (__riviftErr) { __riviftInitFail("L23048 const: const allAppsButton = document.getElementById('all-apps-butt", __riviftErr); }
+            let allAppsGrid; try { allAppsGrid = document.getElementById('all-apps-grid');
+} catch (__riviftErr) { __riviftInitFail("L23049 const: const allAppsGrid = document.getElementById('all-apps-grid')", __riviftErr); }
+            let allAppsSearchBar; try { allAppsSearchBar = document.getElementById('all-apps-search-bar');
+} catch (__riviftErr) { __riviftInitFail("L23050 const: const allAppsSearchBar = document.getElementById('all-apps-s", __riviftErr); }
+            let exitAllAppsButton; try { exitAllAppsButton = document.getElementById('exit-all-apps');
+} catch (__riviftErr) { __riviftInitFail("L23051 const: const exitAllAppsButton = document.getElementById('exit-all-", __riviftErr); }
+            let selectPinAppsButton; try { selectPinAppsButton = document.getElementById('select-pin-apps-button');
+} catch (__riviftErr) { __riviftInitFail("L23052 const: const selectPinAppsButton = document.getElementById('select-", __riviftErr); }
+            let messageBoxOverlay; try { messageBoxOverlay = document.getElementById('message-box-overlay');
+} catch (__riviftErr) { __riviftInitFail("L23053 const: const messageBoxOverlay = document.getElementById('message-b", __riviftErr); }
+            let messageBoxTitle; try { messageBoxTitle = document.getElementById('message-box-title');
+} catch (__riviftErr) { __riviftInitFail("L23054 const: const messageBoxTitle = document.getElementById('message-box", __riviftErr); }
+            let messageBoxContent; try { messageBoxContent = document.getElementById('message-box-content');
+} catch (__riviftErr) { __riviftInitFail("L23055 const: const messageBoxContent = document.getElementById('message-b", __riviftErr); }
+            let messageBoxCustomContent; try { messageBoxCustomContent = document.getElementById('message-box-custom-content');
+} catch (__riviftErr) { __riviftInitFail("L23056 const: const messageBoxCustomContent = document.getElementById('mes", __riviftErr); }
+            let messageBoxOk; try { messageBoxOk = document.getElementById('message-box-ok');
+} catch (__riviftErr) { __riviftInitFail("L23057 let: let messageBoxOk = document.getElementById('message-box-ok')", __riviftErr); }
+            let messageBoxCancel; try { messageBoxCancel = document.getElementById('message-box-cancel');
+} catch (__riviftErr) { __riviftInitFail("L23058 let: let messageBoxCancel = document.getElementById('message-box-", __riviftErr); }
 
-            const lockScreen = document.getElementById('lock-screen');
-            const lockScreenTimeDisplay = document.getElementById('lock-screen-time');
-            const lockScreenDateDisplay = document.getElementById('lock-screen-date');
-            const lockScreenMessage = document.getElementById('lock-screen-message');
-            const lockScreenPasswordArea = document.getElementById('lock-screen-password-area');
-            const lockScreenError = document.getElementById('lock-screen-error');
+            let lockScreen; try { lockScreen = document.getElementById('lock-screen');
+} catch (__riviftErr) { __riviftInitFail("L23060 const: const lockScreen = document.getElementById('lock-screen');", __riviftErr); }
+            let lockScreenTimeDisplay; try { lockScreenTimeDisplay = document.getElementById('lock-screen-time');
+} catch (__riviftErr) { __riviftInitFail("L23061 const: const lockScreenTimeDisplay = document.getElementById('lock-", __riviftErr); }
+            let lockScreenDateDisplay; try { lockScreenDateDisplay = document.getElementById('lock-screen-date');
+} catch (__riviftErr) { __riviftInitFail("L23062 const: const lockScreenDateDisplay = document.getElementById('lock-", __riviftErr); }
+            let lockScreenMessage; try { lockScreenMessage = document.getElementById('lock-screen-message');
+} catch (__riviftErr) { __riviftInitFail("L23063 const: const lockScreenMessage = document.getElementById('lock-scre", __riviftErr); }
+            let lockScreenPasswordArea; try { lockScreenPasswordArea = document.getElementById('lock-screen-password-area');
+} catch (__riviftErr) { __riviftInitFail("L23064 const: const lockScreenPasswordArea = document.getElementById('lock", __riviftErr); }
+            let lockScreenError; try { lockScreenError = document.getElementById('lock-screen-error');
+} catch (__riviftErr) { __riviftInitFail("L23065 const: const lockScreenError = document.getElementById('lock-screen", __riviftErr); }
 
-            const desktopNotificationsContainer = document.getElementById('desktop-notifications-container');
-            const recentAppsFilesList = document.getElementById('recent-apps-files-list');
-            const noRecentItemsMessage = document.getElementById('no-recent-items');
+            let desktopNotificationsContainer; try { desktopNotificationsContainer = document.getElementById('desktop-notifications-container');
+} catch (__riviftErr) { __riviftInitFail("L23067 const: const desktopNotificationsContainer = document.getElementByI", __riviftErr); }
+            let recentAppsFilesList; try { recentAppsFilesList = document.getElementById('recent-apps-files-list');
+} catch (__riviftErr) { __riviftInitFail("L23068 const: const recentAppsFilesList = document.getElementById('recent-", __riviftErr); }
+            let noRecentItemsMessage; try { noRecentItemsMessage = document.getElementById('no-recent-items');
+} catch (__riviftErr) { __riviftInitFail("L23069 const: const noRecentItemsMessage = document.getElementById('no-rec", __riviftErr); }
 
-            const qsThemeToggle = document.getElementById('qs-theme-toggle');
-            const qsAeroToggleContainer = document.getElementById('qs-aero-toggle-container');
-            const qsAeroToggle = document.getElementById('qs-aero-toggle');
-            const qsAeroSubmenuBtn = document.getElementById('qs-aero-submenu-btn');
-            const qsAeroSubmenu = document.getElementById('qs-aero-submenu');
-            const qsVolumeTrack = document.getElementById('qs-volume-slider-track');
-            const qsVolumeFill = document.getElementById('qs-volume-fill');
-            const qsVolumeIcon = document.getElementById('qs-volume-icon');
-            const qsBrightnessTrack = document.getElementById('qs-brightness-slider-track');
-            const qsBrightnessFill = document.getElementById('qs-brightness-fill');
-            const qsMusicPlayPause = document.getElementById('qs-music-play-pause');
-            const qsMusicNext = document.getElementById('qs-music-next');
-            const qsMusicPrev = document.getElementById('qs-music-prev');
-            const qsMusicProgressSlider = document.getElementById('qs-music-progress-slider');
+            let qsThemeToggle; try { qsThemeToggle = document.getElementById('qs-theme-toggle');
+} catch (__riviftErr) { __riviftInitFail("L23071 const: const qsThemeToggle = document.getElementById('qs-theme-togg", __riviftErr); }
+            let qsAeroToggleContainer; try { qsAeroToggleContainer = document.getElementById('qs-aero-toggle-container');
+} catch (__riviftErr) { __riviftInitFail("L23072 const: const qsAeroToggleContainer = document.getElementById('qs-ae", __riviftErr); }
+            let qsAeroToggle; try { qsAeroToggle = document.getElementById('qs-aero-toggle');
+} catch (__riviftErr) { __riviftInitFail("L23073 const: const qsAeroToggle = document.getElementById('qs-aero-toggle", __riviftErr); }
+            let qsAeroSubmenuBtn; try { qsAeroSubmenuBtn = document.getElementById('qs-aero-submenu-btn');
+} catch (__riviftErr) { __riviftInitFail("L23074 const: const qsAeroSubmenuBtn = document.getElementById('qs-aero-su", __riviftErr); }
+            let qsAeroSubmenu; try { qsAeroSubmenu = document.getElementById('qs-aero-submenu');
+} catch (__riviftErr) { __riviftInitFail("L23075 const: const qsAeroSubmenu = document.getElementById('qs-aero-subme", __riviftErr); }
+            let qsVolumeTrack; try { qsVolumeTrack = document.getElementById('qs-volume-slider-track');
+} catch (__riviftErr) { __riviftInitFail("L23076 const: const qsVolumeTrack = document.getElementById('qs-volume-sli", __riviftErr); }
+            let qsVolumeFill; try { qsVolumeFill = document.getElementById('qs-volume-fill');
+} catch (__riviftErr) { __riviftInitFail("L23077 const: const qsVolumeFill = document.getElementById('qs-volume-fill", __riviftErr); }
+            let qsVolumeIcon; try { qsVolumeIcon = document.getElementById('qs-volume-icon');
+} catch (__riviftErr) { __riviftInitFail("L23078 const: const qsVolumeIcon = document.getElementById('qs-volume-icon", __riviftErr); }
+            let qsBrightnessTrack; try { qsBrightnessTrack = document.getElementById('qs-brightness-slider-track');
+} catch (__riviftErr) { __riviftInitFail("L23079 const: const qsBrightnessTrack = document.getElementById('qs-bright", __riviftErr); }
+            let qsBrightnessFill; try { qsBrightnessFill = document.getElementById('qs-brightness-fill');
+} catch (__riviftErr) { __riviftInitFail("L23080 const: const qsBrightnessFill = document.getElementById('qs-brightn", __riviftErr); }
+            let qsMusicPlayPause; try { qsMusicPlayPause = document.getElementById('qs-music-play-pause');
+} catch (__riviftErr) { __riviftInitFail("L23081 const: const qsMusicPlayPause = document.getElementById('qs-music-p", __riviftErr); }
+            let qsMusicNext; try { qsMusicNext = document.getElementById('qs-music-next');
+} catch (__riviftErr) { __riviftInitFail("L23082 const: const qsMusicNext = document.getElementById('qs-music-next')", __riviftErr); }
+            let qsMusicPrev; try { qsMusicPrev = document.getElementById('qs-music-prev');
+} catch (__riviftErr) { __riviftInitFail("L23083 const: const qsMusicPrev = document.getElementById('qs-music-prev')", __riviftErr); }
+            let qsMusicProgressSlider; try { qsMusicProgressSlider = document.getElementById('qs-music-progress-slider');
+} catch (__riviftErr) { __riviftInitFail("L23084 const: const qsMusicProgressSlider = document.getElementById('qs-mu", __riviftErr); }
 
-            if (qsThemeToggle) qsThemeToggle.addEventListener('click', () => {
+            try { if (qsThemeToggle) qsThemeToggle.addEventListener('click', () => {
                 isDarkMode = !isDarkMode;
                 saveIsDarkMode();
                 applyTheme();
             });
+} catch (__riviftErr) { __riviftInitFail("L23086 If: if (qsThemeToggle) qsThemeToggle.addEventListener('click', (", __riviftErr); }
 
             function updateQsThemeToggle() {
                 if (!qsThemeToggle) return;
@@ -23098,22 +23230,24 @@ VFS.init();
                 if (icon) icon.style.transform = isDarkMode ? 'rotate(180deg)' : 'rotate(0deg)';
             }
 
-            if (qsAeroToggle) qsAeroToggle.addEventListener('click', () => {
+            try { if (qsAeroToggle) qsAeroToggle.addEventListener('click', () => {
                 if (!qsAeroSubmenu.classList.contains('hidden')) return;
                 aeroEffectEnabled = !aeroEffectEnabled;
                 saveAeroEffectEnabled();
                 applyVisualEffects();
                 updateQsAeroToggle();
             });
+} catch (__riviftErr) { __riviftInitFail("L23101 If: if (qsAeroToggle) qsAeroToggle.addEventListener('click', () ", __riviftErr); }
 
-            if (qsAeroSubmenuBtn) qsAeroSubmenuBtn.addEventListener('click', (e) => {
+            try { if (qsAeroSubmenuBtn) qsAeroSubmenuBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isHidden = qsAeroSubmenu.classList.toggle('hidden');
                 qsAeroSubmenu.classList.toggle('flex', !isHidden);
                 qsAeroSubmenuBtn.querySelector('i').classList.toggle('rotate-180');
             });
+} catch (__riviftErr) { __riviftInitFail("L23109 If: if (qsAeroSubmenuBtn) qsAeroSubmenuBtn.addEventListener('cli", __riviftErr); }
 
-            if (qsAeroSubmenu) qsAeroSubmenu.addEventListener('click', (e) => {
+            try { if (qsAeroSubmenu) qsAeroSubmenu.addEventListener('click', (e) => {
                 const option = e.target.closest('.qs-aero-option');
                 if (option) {
                     aeroMode = option.dataset.mode;
@@ -23127,6 +23261,7 @@ VFS.init();
                     setTimeout(() => qsAeroSubmenuBtn.click(), 100);
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L23116 If: if (qsAeroSubmenu) qsAeroSubmenu.addEventListener('click', (", __riviftErr); }
 
             function updateQsAeroToggle() {
                 if (!qsAeroToggleContainer) return;
@@ -23138,10 +23273,14 @@ VFS.init();
                 }
             }
 
-            const qsNearbyReceiveContainer = document.getElementById('qs-nearby-receive-toggle-container');
-            const qsNearbyReceiveToggle = document.getElementById('qs-nearby-receive-toggle');
-            const qsNearbyReceiveSubmenuBtn = document.getElementById('qs-nearby-receive-submenu-btn');
-            const qsNearbyReceiveSubmenu = document.getElementById('qs-nearby-receive-submenu');
+            let qsNearbyReceiveContainer; try { qsNearbyReceiveContainer = document.getElementById('qs-nearby-receive-toggle-container');
+} catch (__riviftErr) { __riviftInitFail("L23141 const: const qsNearbyReceiveContainer = document.getElementById('qs", __riviftErr); }
+            let qsNearbyReceiveToggle; try { qsNearbyReceiveToggle = document.getElementById('qs-nearby-receive-toggle');
+} catch (__riviftErr) { __riviftInitFail("L23142 const: const qsNearbyReceiveToggle = document.getElementById('qs-ne", __riviftErr); }
+            let qsNearbyReceiveSubmenuBtn; try { qsNearbyReceiveSubmenuBtn = document.getElementById('qs-nearby-receive-submenu-btn');
+} catch (__riviftErr) { __riviftInitFail("L23143 const: const qsNearbyReceiveSubmenuBtn = document.getElementById('q", __riviftErr); }
+            let qsNearbyReceiveSubmenu; try { qsNearbyReceiveSubmenu = document.getElementById('qs-nearby-receive-submenu');
+} catch (__riviftErr) { __riviftInitFail("L23144 const: const qsNearbyReceiveSubmenu = document.getElementById('qs-n", __riviftErr); }
 
             function updateQsNearbyReceiveToggle() {
                 if (!qsNearbyReceiveContainer) return;
@@ -23155,22 +23294,24 @@ VFS.init();
                 }
             }
 
-            if (qsNearbyReceiveToggle) qsNearbyReceiveToggle.addEventListener('click', async () => {
+            try { if (qsNearbyReceiveToggle) qsNearbyReceiveToggle.addEventListener('click', async () => {
                 if (qsNearbyReceiveSubmenu && !qsNearbyReceiveSubmenu.classList.contains('hidden')) return;
                 const nextOn = !window.NearbyShare?.isPersistentReceiveOn?.();
                 qsNearbyReceiveContainer?.classList.toggle('active', nextOn);
                 await window.NearbyShare?.setPersistentReceive?.(nextOn);
                 updateQsNearbyReceiveToggle();
             });
+} catch (__riviftErr) { __riviftInitFail("L23158 If: if (qsNearbyReceiveToggle) qsNearbyReceiveToggle.addEventLis", __riviftErr); }
 
-            if (qsNearbyReceiveSubmenuBtn) qsNearbyReceiveSubmenuBtn.addEventListener('click', (e) => {
+            try { if (qsNearbyReceiveSubmenuBtn) qsNearbyReceiveSubmenuBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isHidden = qsNearbyReceiveSubmenu.classList.toggle('hidden');
                 qsNearbyReceiveSubmenu.classList.toggle('flex', !isHidden);
                 qsNearbyReceiveSubmenuBtn.querySelector('i').classList.toggle('rotate-180');
             });
+} catch (__riviftErr) { __riviftInitFail("L23166 If: if (qsNearbyReceiveSubmenuBtn) qsNearbyReceiveSubmenuBtn.add", __riviftErr); }
 
-            if (qsNearbyReceiveSubmenu) qsNearbyReceiveSubmenu.addEventListener('click', async (e) => {
+            try { if (qsNearbyReceiveSubmenu) qsNearbyReceiveSubmenu.addEventListener('click', async (e) => {
                 const option = e.target.closest('.qs-nearby-receive-option');
                 if (option) {
                     const mode = option.dataset.mode;
@@ -23179,6 +23320,7 @@ VFS.init();
                     setTimeout(() => qsNearbyReceiveSubmenuBtn.click(), 100);
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L23173 If: if (qsNearbyReceiveSubmenu) qsNearbyReceiveSubmenu.addEventL", __riviftErr); }
 
             function setupVerticalSlider(trackElement, fillElement, onUpdate, onIconUpdate) {
                 let isDragging = false;
@@ -23215,7 +23357,7 @@ VFS.init();
                 return trackElement;
             }
 
-            const volumeSliderController = setupVerticalSlider(qsVolumeTrack, qsVolumeFill,
+            let volumeSliderController; try { volumeSliderController = setupVerticalSlider(qsVolumeTrack, qsVolumeFill,
                 (value, force = false) => {
                     systemVolume = value; saveSystemVolume(force);
                     openApps.forEach(a => { if (a.audio) a.audio.volume = value / 100; });
@@ -23227,26 +23369,32 @@ VFS.init();
                     else qsVolumeIcon.className = 'fas fa-volume-up text-xl absolute top-3 left-1/2 -translate-x-1/2 z-10 text-white/50';
                 }
             );
+} catch (__riviftErr) { __riviftInitFail("L23218 const: const volumeSliderController = setupVerticalSlider(qsVolumeT", __riviftErr); }
 
-            const brightnessSliderController = setupVerticalSlider(qsBrightnessTrack, qsBrightnessFill,
+            let brightnessSliderController; try { brightnessSliderController = setupVerticalSlider(qsBrightnessTrack, qsBrightnessFill,
                 (value, force = false) => {
                     systemBrightness = value; saveSystemBrightness(force);
                     const ov = document.getElementById('brightness-overlay');
                     if (ov) ov.style.opacity = (1 - (value / 100)) * 0.6;
                 }
             );
+} catch (__riviftErr) { __riviftInitFail("L23231 const: const brightnessSliderController = setupVerticalSlider(qsBri", __riviftErr); }
 
-            if (qsMusicPlayPause) qsMusicPlayPause.addEventListener('click', () => {
+            try { if (qsMusicPlayPause) qsMusicPlayPause.addEventListener('click', () => {
                 if (window.globalMusicState?.isPlaying) window.globalMusicState.pause();
                 else window.globalMusicState?.play?.();
             });
-            if (qsMusicNext) qsMusicNext.addEventListener('click', () => window.globalMusicState?.next?.());
-            if (qsMusicPrev) qsMusicPrev.addEventListener('click', () => window.globalMusicState?.prev?.());
-            if (qsMusicProgressSlider) {
+} catch (__riviftErr) { __riviftInitFail("L23239 If: if (qsMusicPlayPause) qsMusicPlayPause.addEventListener('cli", __riviftErr); }
+            try { if (qsMusicNext) qsMusicNext.addEventListener('click', () => window.globalMusicState?.next?.());
+} catch (__riviftErr) { __riviftInitFail("L23243 If: if (qsMusicNext) qsMusicNext.addEventListener('click', () =>", __riviftErr); }
+            try { if (qsMusicPrev) qsMusicPrev.addEventListener('click', () => window.globalMusicState?.prev?.());
+} catch (__riviftErr) { __riviftInitFail("L23244 If: if (qsMusicPrev) qsMusicPrev.addEventListener('click', () =>", __riviftErr); }
+            try { if (qsMusicProgressSlider) {
                 qsMusicProgressSlider.addEventListener('input', (e) => {
                     if (window.globalMusicState?.audioElement) window.globalMusicState.audioElement.currentTime = e.target.value;
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L23245 If: if (qsMusicProgressSlider) { qsMusicProgressSlider.addEventL", __riviftErr); }
 
             function updateQuickSettingsMusicPlayer() {
                 const titleEl = document.getElementById('qs-music-title');
@@ -23290,8 +23438,10 @@ VFS.init();
                 }
             }
 
-            let isNightModeEnabled = JSON.parse(localStorage.getItem('riviftNightModeEnabled')) || false;
-            const nightModeOverlay = document.getElementById('night-mode-overlay');
+            let isNightModeEnabled; try { isNightModeEnabled = __lsParse(localStorage.getItem('riviftNightModeEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23293 let: let isNightModeEnabled = __lsParse(localStorage.getItem('riv", __riviftErr); }
+            let nightModeOverlay; try { nightModeOverlay = document.getElementById('night-mode-overlay');
+} catch (__riviftErr) { __riviftInitFail("L23294 const: const nightModeOverlay = document.getElementById('night-mode", __riviftErr); }
             function toggleNightMode(enable) {
                 isNightModeEnabled = (typeof enable === 'boolean') ? enable : !isNightModeEnabled;
                 if (nightModeOverlay) nightModeOverlay.style.display = isNightModeEnabled ? 'block' : 'none';
@@ -23303,8 +23453,10 @@ VFS.init();
                 }
                 localStorage.setItem('riviftNightModeEnabled', JSON.stringify(isNightModeEnabled));
             }
-            const qsNightModeToggle = document.getElementById('qs-night-mode-toggle');
-            if (qsNightModeToggle) qsNightModeToggle.addEventListener('click', () => toggleNightMode());
+            let qsNightModeToggle; try { qsNightModeToggle = document.getElementById('qs-night-mode-toggle');
+} catch (__riviftErr) { __riviftInitFail("L23306 const: const qsNightModeToggle = document.getElementById('qs-night-", __riviftErr); }
+            try { if (qsNightModeToggle) qsNightModeToggle.addEventListener('click', () => toggleNightMode());
+} catch (__riviftErr) { __riviftInitFail("L23307 If: if (qsNightModeToggle) qsNightModeToggle.addEventListener('c", __riviftErr); }
 
             function updateAllQsToggles() {
                 updateQsThemeToggle();
@@ -23323,11 +23475,11 @@ VFS.init();
             function renderCCTiles() { updateQsThemeToggle(); updateQsAeroToggle(); }
             function updateCCAeroSubmenu() { updateQsAeroToggle(); }
 
-            (function initQsResize() {
+            try { (function initQsResize() {
                 const STORAGE_KEY = 'riviftQsSizes';
 
                 function loadSizes() {
-                    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+                    try { return __lsParse(localStorage.getItem(STORAGE_KEY)) || {}; }
                     catch { return {}; }
                 }
                 function saveSizes(sizes) {
@@ -23457,13 +23609,19 @@ VFS.init();
                     setTimeout(init, 200);
                 }
             })();
+} catch (__riviftErr) { __riviftInitFail("L23326 Expression: (function initQsResize() { const STORAGE_KEY = 'riviftQsSize", __riviftErr); }
 
-            document.getElementById('power-lock').addEventListener('click', lockOS);
-            document.getElementById('power-restart').addEventListener('click', restartOS);
-            document.getElementById('power-shutdown').addEventListener('click', shutdownOS);
+            try { document.getElementById('power-lock').addEventListener('click', lockOS);
+} catch (__riviftErr) { __riviftInitFail("L23461 Expression: document.getElementById('power-lock').addEventListener('clic", __riviftErr); }
+            try { document.getElementById('power-restart').addEventListener('click', restartOS);
+} catch (__riviftErr) { __riviftInitFail("L23462 Expression: document.getElementById('power-restart').addEventListener('c", __riviftErr); }
+            try { document.getElementById('power-shutdown').addEventListener('click', shutdownOS);
+} catch (__riviftErr) { __riviftInitFail("L23463 Expression: document.getElementById('power-shutdown').addEventListener('", __riviftErr); }
 
-            let desktops = RiviftOS.desktopManager.desktops;
-            let activeDesktopId = RiviftOS.desktopManager.activeDesktopId;
+            let desktops; try { desktops = RiviftOS.desktopManager.desktops;
+} catch (__riviftErr) { __riviftInitFail("L23465 let: let desktops = RiviftOS.desktopManager.desktops;", __riviftErr); }
+            let activeDesktopId; try { activeDesktopId = RiviftOS.desktopManager.activeDesktopId;
+} catch (__riviftErr) { __riviftInitFail("L23466 let: let activeDesktopId = RiviftOS.desktopManager.activeDesktopI", __riviftErr); }
             let isLocked = false;
             let pinMode = false;
             let snapHideTimeout;
@@ -23474,19 +23632,23 @@ VFS.init();
             let maximizePreviewActive = false;
             let snapType = null;
 
-            const calendarEvents = JSON.parse(localStorage.getItem('riviftCalendarEvents')) || {};
+            let calendarEvents; try { calendarEvents = __lsParse(localStorage.getItem('riviftCalendarEvents')) || {};
+} catch (__riviftErr) { __riviftInitFail("L23477 const: const calendarEvents = __lsParse(localStorage.getItem('rivif", __riviftErr); }
             const notifications = [];
-            let notificationHistory = JSON.parse(localStorage.getItem('riviftNotificationHistory')) || [];
+            let notificationHistory; try { notificationHistory = __lsParse(localStorage.getItem('riviftNotificationHistory')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23479 let: let notificationHistory = __lsParse(localStorage.getItem('ri", __riviftErr); }
             function saveNotificationHistory() {
                 if (notificationHistory.length > 50) notificationHistory = notificationHistory.slice(-50);
                 localStorage.setItem('riviftNotificationHistory', JSON.stringify(notificationHistory));
             }
-            const alarms = JSON.parse(localStorage.getItem('riviftAlarms')) || [];
+            let alarms; try { alarms = __lsParse(localStorage.getItem('riviftAlarms')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23484 const: const alarms = __lsParse(localStorage.getItem('riviftAlarms'", __riviftErr); }
             let timerIntervalId = null;
             let timerRemaining = 0;
             let stopwatchIntervalId = null;
             let stopwatchElapsedTime = 0;
-            let recentItems = JSON.parse(localStorage.getItem('riviftRecentItems')) || []; // { type: 'app'/'file', id: 'appId', name: 'App Name', icon: 'fas fa-cog' }
+            let recentItems; try { recentItems = __lsParse(localStorage.getItem('riviftRecentItems')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23489 let: let recentItems = __lsParse(localStorage.getItem('riviftRece", __riviftErr); } // { type: 'app'/'file', id: 'appId', name: 'App Name', icon: 'fas fa-cog' }
 
             let pinnedApps;
             try {
@@ -23504,16 +23666,19 @@ VFS.init();
                 pinnedApps = ['settings', 'calculator', 'notepad', 'browser', 'pingpong', 'music-player', 'calendar', 'app-store', 'files', 'command', 'script-editor', 'drawing-tool', 'weather', 'notes', 'image-viewer', 'media-player', 'text-reader', 'app-creator', 'video-editor'];
             }
             let osPassword = '';
-            let osPasswordType = localStorage.getItem('riviftOSPasswordType') || 'pin';
+            let osPasswordType; try { osPasswordType = localStorage.getItem('riviftOSPasswordType') || 'pin';
+} catch (__riviftErr) { __riviftInitFail("L23507 let: let osPasswordType = localStorage.getItem('riviftOSPasswordT", __riviftErr); }
             let osPatternPassword = [];
-            let passwordLoginEnabled = JSON.parse(localStorage.getItem('riviftPasswordLoginEnabled')) || false;
-            window.RiviftAuthState = {
+            let passwordLoginEnabled; try { passwordLoginEnabled = __lsParse(localStorage.getItem('riviftPasswordLoginEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23509 let: let passwordLoginEnabled = __lsParse(localStorage.getItem('r", __riviftErr); }
+            try { window.RiviftAuthState = {
                 isPasswordLoginEnabled: () => passwordLoginEnabled,
                 getOSPasswordType: () => osPasswordType,
                 getOSPassword: () => osPassword,
                 getOSPatternPassword: () => osPatternPassword,
                 isLocked: () => isLocked,
             };
+} catch (__riviftErr) { __riviftInitFail("L23510 Expression: window.RiviftAuthState = { isPasswordLoginEnabled: () => pas", __riviftErr); }
             async function _initPasswords() {
                 const encPw = localStorage.getItem('riviftOSPassword') || '';
                 const encPat = localStorage.getItem('riviftOSPatternPassword') || '';
@@ -23525,27 +23690,47 @@ VFS.init();
                     osPatternPassword = [];
                 }
             }
-            let currentWallpaper = localStorage.getItem('riviftCurrentWallpaper') || 'wallpapers/RiviftOSD.png';
-            let wallpaperMode = localStorage.getItem('riviftWallpaperMode') || 'static';
-            let customWallpapers = JSON.parse(localStorage.getItem('riviftCustomWallpapers') || '[]');
-            let wallpaperSlideshowEnabled = JSON.parse(localStorage.getItem('riviftWallpaperSlideshowEnabled')) || false;
-            let slideshowInterval = parseInt(localStorage.getItem('riviftSlideshowInterval')) || 60;
-            let isDarkMode = JSON.parse(localStorage.getItem('riviftIsDarkMode')) !== null ? JSON.parse(localStorage.getItem('riviftIsDarkMode')) : true;
-            let autoThemeEnabled = JSON.parse(localStorage.getItem('riviftAutoThemeEnabled')) || false;
+            let currentWallpaper; try { currentWallpaper = localStorage.getItem('riviftCurrentWallpaper') || 'wallpapers/RiviftOSD.png';
+} catch (__riviftErr) { __riviftInitFail("L23528 let: let currentWallpaper = localStorage.getItem('riviftCurrentWa", __riviftErr); }
+            let wallpaperMode; try { wallpaperMode = localStorage.getItem('riviftWallpaperMode') || 'static';
+} catch (__riviftErr) { __riviftInitFail("L23529 let: let wallpaperMode = localStorage.getItem('riviftWallpaperMod", __riviftErr); }
+            let customWallpapers; try { customWallpapers = __lsParse(localStorage.getItem('riviftCustomWallpapers'), []);
+} catch (__riviftErr) { __riviftInitFail("L23530 let: let customWallpapers = __lsParse(localStorage.getItem('rivif", __riviftErr); }
+            let wallpaperSlideshowEnabled; try { wallpaperSlideshowEnabled = __lsParse(localStorage.getItem('riviftWallpaperSlideshowEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23531 let: let wallpaperSlideshowEnabled = __lsParse(localStorage.getIt", __riviftErr); }
+            let slideshowInterval; try { slideshowInterval = parseInt(localStorage.getItem('riviftSlideshowInterval')) || 60;
+} catch (__riviftErr) { __riviftInitFail("L23532 let: let slideshowInterval = parseInt(localStorage.getItem('rivif", __riviftErr); }
+            let isDarkMode; try { isDarkMode = __lsParse(localStorage.getItem('riviftIsDarkMode')) !== null ? __lsParse(localStorage.getItem('riviftIsDarkMode')) : true;
+} catch (__riviftErr) { __riviftInitFail("L23533 let: let isDarkMode = __lsParse(localStorage.getItem('riviftIsDar", __riviftErr); }
+            let autoThemeEnabled; try { autoThemeEnabled = __lsParse(localStorage.getItem('riviftAutoThemeEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23534 let: let autoThemeEnabled = __lsParse(localStorage.getItem('rivif", __riviftErr); }
 
-            let desktopNotificationsEnabled = JSON.parse(localStorage.getItem('riviftDesktopNotificationsEnabled')) || true;
-            let notificationDismissTime = parseInt(localStorage.getItem('riviftNotificationDismissTime')) || 5;
-            let notificationSoundEnabled = localStorage.getItem('riviftNotificationSoundEnabled') !== null ? JSON.parse(localStorage.getItem('riviftNotificationSoundEnabled')) : true;
-            window._isSilentModeActive = localStorage.getItem('rivift_silent_mode') === 'true';
-            let taskbarAlwaysVisible = JSON.parse(localStorage.getItem('riviftTaskbarAlwaysVisible')) || false;
-            let taskbarAutoFitIcons = JSON.parse(localStorage.getItem('riviftTaskbarAutoFitIcons')) || false;
-            let taskbarCenterAlign = JSON.parse(localStorage.getItem('riviftTaskbarCenterAlign')) || false;
-            let showDateOnTaskbar = JSON.parse(localStorage.getItem('riviftShowDateOnTaskbar')) || false;
-            let timeFormat24Hour = JSON.parse(localStorage.getItem('riviftTimeFormat24Hour')) || true;
-            let savedNotes = JSON.parse(localStorage.getItem('riviftNotes')) || [];
-            let appIconSize = parseInt(localStorage.getItem('riviftAppIconSize')) || 44; // Default 44px
-            let desktopIconAlignment = localStorage.getItem('riviftIconAlignment') || 'free';
-            let desktopIconGridOrigin = JSON.parse(localStorage.getItem('riviftDesktopIconGridOrigin')) || { x: 10, y: 10 };
+            let desktopNotificationsEnabled; try { desktopNotificationsEnabled = __lsParse(localStorage.getItem('riviftDesktopNotificationsEnabled')) || true;
+} catch (__riviftErr) { __riviftInitFail("L23536 let: let desktopNotificationsEnabled = __lsParse(localStorage.get", __riviftErr); }
+            let notificationDismissTime; try { notificationDismissTime = parseInt(localStorage.getItem('riviftNotificationDismissTime')) || 5;
+} catch (__riviftErr) { __riviftInitFail("L23537 let: let notificationDismissTime = parseInt(localStorage.getItem(", __riviftErr); }
+            let notificationSoundEnabled; try { notificationSoundEnabled = localStorage.getItem('riviftNotificationSoundEnabled') !== null ? __lsParse(localStorage.getItem('riviftNotificationSoundEnabled')) : true;
+} catch (__riviftErr) { __riviftInitFail("L23538 let: let notificationSoundEnabled = localStorage.getItem('riviftN", __riviftErr); }
+            try { window._isSilentModeActive = localStorage.getItem('rivift_silent_mode') === 'true';
+} catch (__riviftErr) { __riviftInitFail("L23539 Expression: window._isSilentModeActive = localStorage.getItem('rivift_si", __riviftErr); }
+            let taskbarAlwaysVisible; try { taskbarAlwaysVisible = __lsParse(localStorage.getItem('riviftTaskbarAlwaysVisible')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23540 let: let taskbarAlwaysVisible = __lsParse(localStorage.getItem('r", __riviftErr); }
+            let taskbarAutoFitIcons; try { taskbarAutoFitIcons = __lsParse(localStorage.getItem('riviftTaskbarAutoFitIcons')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23541 let: let taskbarAutoFitIcons = __lsParse(localStorage.getItem('ri", __riviftErr); }
+            let taskbarCenterAlign; try { taskbarCenterAlign = __lsParse(localStorage.getItem('riviftTaskbarCenterAlign')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23542 let: let taskbarCenterAlign = __lsParse(localStorage.getItem('riv", __riviftErr); }
+            let showDateOnTaskbar; try { showDateOnTaskbar = __lsParse(localStorage.getItem('riviftShowDateOnTaskbar')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23543 let: let showDateOnTaskbar = __lsParse(localStorage.getItem('rivi", __riviftErr); }
+            let timeFormat24Hour; try { timeFormat24Hour = __lsParse(localStorage.getItem('riviftTimeFormat24Hour')) || true;
+} catch (__riviftErr) { __riviftInitFail("L23544 let: let timeFormat24Hour = __lsParse(localStorage.getItem('rivif", __riviftErr); }
+            let savedNotes; try { savedNotes = __lsParse(localStorage.getItem('riviftNotes')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23545 let: let savedNotes = __lsParse(localStorage.getItem('riviftNotes", __riviftErr); }
+            let appIconSize; try { appIconSize = parseInt(localStorage.getItem('riviftAppIconSize')) || 44;
+} catch (__riviftErr) { __riviftInitFail("L23546 let: let appIconSize = parseInt(localStorage.getItem('riviftAppIc", __riviftErr); } // Default 44px
+            let desktopIconAlignment; try { desktopIconAlignment = localStorage.getItem('riviftIconAlignment') || 'free';
+} catch (__riviftErr) { __riviftInitFail("L23547 let: let desktopIconAlignment = localStorage.getItem('riviftIconA", __riviftErr); }
+            let desktopIconGridOrigin; try { desktopIconGridOrigin = __lsParse(localStorage.getItem('riviftDesktopIconGridOrigin')) || { x: 10, y: 10 };
+} catch (__riviftErr) { __riviftInitFail("L23548 let: let desktopIconGridOrigin = __lsParse(localStorage.getItem('", __riviftErr); }
 
             function snapToDesktopGrid(x, y) {
                 const gridSize = 116; // [FIX] ラベル2行分の高さを確保するため縦横の間隔を広げた
@@ -23556,12 +23741,18 @@ VFS.init();
                 };
             }
 
-            let windowDragAnimEnabled = JSON.parse(localStorage.getItem('riviftWindowDragAnimEnabled')) !== false; // デフォルトON
-            let windowDragStyle = localStorage.getItem('riviftWindowDragStyle') || 'rise';   // 'rise' | 'sink'
-            let windowTiltEnabled = JSON.parse(localStorage.getItem('riviftWindowTiltEnabled')) !== false;     // デフォルトON
-            let customWindowRadiusEnabled = JSON.parse(localStorage.getItem('riviftCustomWindowRadiusEnabled')) || false; // デフォルトOFF
-            let customWindowRadiusValue = parseInt(localStorage.getItem('riviftCustomWindowRadiusValue'), 10);
-            if (isNaN(customWindowRadiusValue)) customWindowRadiusValue = 15;
+            let windowDragAnimEnabled; try { windowDragAnimEnabled = __lsParse(localStorage.getItem('riviftWindowDragAnimEnabled')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23559 let: let windowDragAnimEnabled = __lsParse(localStorage.getItem('", __riviftErr); } // デフォルトON
+            let windowDragStyle; try { windowDragStyle = localStorage.getItem('riviftWindowDragStyle') || 'rise';
+} catch (__riviftErr) { __riviftInitFail("L23560 let: let windowDragStyle = localStorage.getItem('riviftWindowDrag", __riviftErr); }   // 'rise' | 'sink'
+            let windowTiltEnabled; try { windowTiltEnabled = __lsParse(localStorage.getItem('riviftWindowTiltEnabled')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23561 let: let windowTiltEnabled = __lsParse(localStorage.getItem('rivi", __riviftErr); }     // デフォルトON
+            let customWindowRadiusEnabled; try { customWindowRadiusEnabled = __lsParse(localStorage.getItem('riviftCustomWindowRadiusEnabled')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23562 let: let customWindowRadiusEnabled = __lsParse(localStorage.getIt", __riviftErr); } // デフォルトOFF
+            let customWindowRadiusValue; try { customWindowRadiusValue = parseInt(localStorage.getItem('riviftCustomWindowRadiusValue'), 10);
+} catch (__riviftErr) { __riviftInitFail("L23563 let: let customWindowRadiusValue = parseInt(localStorage.getItem(", __riviftErr); }
+            try { if (isNaN(customWindowRadiusValue)) customWindowRadiusValue = 15;
+} catch (__riviftErr) { __riviftInitFail("L23564 If: if (isNaN(customWindowRadiusValue)) customWindowRadiusValue ", __riviftErr); }
             function applyWindowRadius() {
                 if (customWindowRadiusEnabled) {
                     document.documentElement.style.setProperty('--window-radius', customWindowRadiusValue + 'px');
@@ -23569,10 +23760,14 @@ VFS.init();
                     document.documentElement.style.removeProperty('--window-radius');
                 }
             }
-            applyWindowRadius();
-            let snapAssistEnabled = JSON.parse(localStorage.getItem('riviftSnapAssistEnabled')) !== false; // デフォルトON
-            let windowShakeMinimizeEnabled = JSON.parse(localStorage.getItem('riviftWindowShakeMinimizeEnabled')) === true; // デフォルトOFF
-            let inactiveGrayscaleEnabled = JSON.parse(localStorage.getItem('riviftInactiveGrayscaleEnabled')) === true; // デフォルトOFF
+            try { applyWindowRadius();
+} catch (__riviftErr) { __riviftInitFail("L23572 Expression: applyWindowRadius();", __riviftErr); }
+            let snapAssistEnabled; try { snapAssistEnabled = __lsParse(localStorage.getItem('riviftSnapAssistEnabled')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23573 let: let snapAssistEnabled = __lsParse(localStorage.getItem('rivi", __riviftErr); } // デフォルトON
+            let windowShakeMinimizeEnabled; try { windowShakeMinimizeEnabled = __lsParse(localStorage.getItem('riviftWindowShakeMinimizeEnabled')) === true;
+} catch (__riviftErr) { __riviftInitFail("L23574 let: let windowShakeMinimizeEnabled = __lsParse(localStorage.getI", __riviftErr); } // デフォルトOFF
+            let inactiveGrayscaleEnabled; try { inactiveGrayscaleEnabled = __lsParse(localStorage.getItem('riviftInactiveGrayscaleEnabled')) === true;
+} catch (__riviftErr) { __riviftInitFail("L23575 let: let inactiveGrayscaleEnabled = __lsParse(localStorage.getIte", __riviftErr); } // デフォルトOFF
 
             function applyInactiveGrayscale() {
                 if (typeof document === 'undefined' || !document.body) return;
@@ -23610,8 +23805,9 @@ VFS.init();
                     winEl.classList.toggle('active-focus', isFocused);
                 });
             }
-            window.applyInactiveGrayscale = applyInactiveGrayscale;
-            window.addEventListener('blur', () => {
+            try { window.applyInactiveGrayscale = applyInactiveGrayscale;
+} catch (__riviftErr) { __riviftInitFail("L23613 Expression: window.applyInactiveGrayscale = applyInactiveGrayscale;", __riviftErr); }
+            try { window.addEventListener('blur', () => {
                 setTimeout(() => {
                     const active = document.activeElement;
                     if (active && active.tagName === 'IFRAME') {
@@ -23622,6 +23818,7 @@ VFS.init();
                     }
                 }, 0);
             });
+} catch (__riviftErr) { __riviftInitFail("L23614 Expression: window.addEventListener('blur', () => { setTimeout(() => { c", __riviftErr); }
 
             function saveWindowAnimSettings() {
                 localStorage.setItem('riviftWindowDragAnimEnabled', JSON.stringify(windowDragAnimEnabled));
@@ -23633,22 +23830,36 @@ VFS.init();
                 localStorage.setItem('riviftWindowShakeMinimizeEnabled', JSON.stringify(windowShakeMinimizeEnabled));
                 localStorage.setItem('riviftInactiveGrayscaleEnabled', JSON.stringify(inactiveGrayscaleEnabled));
             }
-            applyInactiveGrayscale();
+            try { applyInactiveGrayscale();
+} catch (__riviftErr) { __riviftInitFail("L23636 Expression: applyInactiveGrayscale();", __riviftErr); }
 
-            window.toggleMagnifier = window.toggleMagnifier || function () { };
+            try { window.toggleMagnifier = window.toggleMagnifier || function () { };
+} catch (__riviftErr) { __riviftInitFail("L23638 Expression: window.toggleMagnifier = window.toggleMagnifier || function ", __riviftErr); }
 
-            let a11yHighContrast = JSON.parse(localStorage.getItem('riviftA11yHighContrast')) || false;
-            let a11yLargeText = JSON.parse(localStorage.getItem('riviftA11yLargeText')) || false;
-            let a11yReduceMotion = JSON.parse(localStorage.getItem('riviftA11yReduceMotion')) || false;
-            let a11yFocusHighlight = JSON.parse(localStorage.getItem('riviftA11yFocusHighlight')) || false;
-            let a11yCursorSize = localStorage.getItem('riviftA11yCursorSize') || 'normal'; // 'normal' | 'large' | 'xlarge'
-            let a11yColorFilter = localStorage.getItem('riviftA11yColorFilter') || 'none';  // 'none' | 'protanopia' | 'deuteranopia' | 'tritanopia' | 'grayscale'
-            let a11yStickyKeys = JSON.parse(localStorage.getItem('riviftA11yStickyKeys')) || false;
-            let a11yScreenMagnifier = JSON.parse(localStorage.getItem('riviftA11yScreenMagnifier')) || false;
-            let a11yMagnifierLevel = parseFloat(localStorage.getItem('riviftA11yMagnifierLevel')) || 2.0;
-            let a11yKeyboardNav = JSON.parse(localStorage.getItem('riviftA11yKeyboardNav')) || false;
-            let a11yTextSpacing = JSON.parse(localStorage.getItem('riviftA11yTextSpacing')) || false;
-            let a11yMonoAudio = JSON.parse(localStorage.getItem('riviftA11yMonoAudio')) || false;
+            let a11yHighContrast; try { a11yHighContrast = __lsParse(localStorage.getItem('riviftA11yHighContrast')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23640 let: let a11yHighContrast = __lsParse(localStorage.getItem('rivif", __riviftErr); }
+            let a11yLargeText; try { a11yLargeText = __lsParse(localStorage.getItem('riviftA11yLargeText')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23641 let: let a11yLargeText = __lsParse(localStorage.getItem('riviftA1", __riviftErr); }
+            let a11yReduceMotion; try { a11yReduceMotion = __lsParse(localStorage.getItem('riviftA11yReduceMotion')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23642 let: let a11yReduceMotion = __lsParse(localStorage.getItem('rivif", __riviftErr); }
+            let a11yFocusHighlight; try { a11yFocusHighlight = __lsParse(localStorage.getItem('riviftA11yFocusHighlight')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23643 let: let a11yFocusHighlight = __lsParse(localStorage.getItem('riv", __riviftErr); }
+            let a11yCursorSize; try { a11yCursorSize = localStorage.getItem('riviftA11yCursorSize') || 'normal';
+} catch (__riviftErr) { __riviftInitFail("L23644 let: let a11yCursorSize = localStorage.getItem('riviftA11yCursorS", __riviftErr); } // 'normal' | 'large' | 'xlarge'
+            let a11yColorFilter; try { a11yColorFilter = localStorage.getItem('riviftA11yColorFilter') || 'none';
+} catch (__riviftErr) { __riviftInitFail("L23645 let: let a11yColorFilter = localStorage.getItem('riviftA11yColorF", __riviftErr); }  // 'none' | 'protanopia' | 'deuteranopia' | 'tritanopia' | 'grayscale'
+            let a11yStickyKeys; try { a11yStickyKeys = __lsParse(localStorage.getItem('riviftA11yStickyKeys')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23646 let: let a11yStickyKeys = __lsParse(localStorage.getItem('riviftA", __riviftErr); }
+            let a11yScreenMagnifier; try { a11yScreenMagnifier = __lsParse(localStorage.getItem('riviftA11yScreenMagnifier')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23647 let: let a11yScreenMagnifier = __lsParse(localStorage.getItem('ri", __riviftErr); }
+            let a11yMagnifierLevel; try { a11yMagnifierLevel = parseFloat(localStorage.getItem('riviftA11yMagnifierLevel')) || 2.0;
+} catch (__riviftErr) { __riviftInitFail("L23648 let: let a11yMagnifierLevel = parseFloat(localStorage.getItem('ri", __riviftErr); }
+            let a11yKeyboardNav; try { a11yKeyboardNav = __lsParse(localStorage.getItem('riviftA11yKeyboardNav')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23649 let: let a11yKeyboardNav = __lsParse(localStorage.getItem('rivift", __riviftErr); }
+            let a11yTextSpacing; try { a11yTextSpacing = __lsParse(localStorage.getItem('riviftA11yTextSpacing')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23650 let: let a11yTextSpacing = __lsParse(localStorage.getItem('rivift", __riviftErr); }
+            let a11yMonoAudio; try { a11yMonoAudio = __lsParse(localStorage.getItem('riviftA11yMonoAudio')) || false;
+} catch (__riviftErr) { __riviftInitFail("L23651 let: let a11yMonoAudio = __lsParse(localStorage.getItem('riviftA1", __riviftErr); }
 
             function saveA11ySettings() {
                 localStorage.setItem('riviftA11yHighContrast', JSON.stringify(a11yHighContrast));
@@ -23687,23 +23898,34 @@ VFS.init();
                 }
             }
 
-            let aeroEffectEnabled = JSON.parse(localStorage.getItem('riviftAeroEffectEnabled')) !== null ? JSON.parse(localStorage.getItem('riviftAeroEffectEnabled')) : true;
-            let aeroMode = localStorage.getItem('riviftAeroMode') || 'smoke';
-            let aeroCustomOpacity = parseInt(localStorage.getItem('riviftAeroCustomOpacity') || '65', 10);
-            let aeroCustomBlur = parseInt(localStorage.getItem('riviftAeroCustomBlur') || '20', 10);
-            let aeroCustomSaturate = parseInt(localStorage.getItem('riviftAeroCustomSaturate') || '180', 10);
+            let aeroEffectEnabled; try { aeroEffectEnabled = __lsParse(localStorage.getItem('riviftAeroEffectEnabled')) !== null ? __lsParse(localStorage.getItem('riviftAeroEffectEnabled')) : true;
+} catch (__riviftErr) { __riviftInitFail("L23690 let: let aeroEffectEnabled = __lsParse(localStorage.getItem('rivi", __riviftErr); }
+            let aeroMode; try { aeroMode = localStorage.getItem('riviftAeroMode') || 'smoke';
+} catch (__riviftErr) { __riviftInitFail("L23691 let: let aeroMode = localStorage.getItem('riviftAeroMode') || 'sm", __riviftErr); }
+            let aeroCustomOpacity; try { aeroCustomOpacity = parseInt(localStorage.getItem('riviftAeroCustomOpacity') || '65', 10);
+} catch (__riviftErr) { __riviftInitFail("L23692 let: let aeroCustomOpacity = parseInt(localStorage.getItem('rivif", __riviftErr); }
+            let aeroCustomBlur; try { aeroCustomBlur = parseInt(localStorage.getItem('riviftAeroCustomBlur') || '20', 10);
+} catch (__riviftErr) { __riviftInitFail("L23693 let: let aeroCustomBlur = parseInt(localStorage.getItem('riviftAe", __riviftErr); }
+            let aeroCustomSaturate; try { aeroCustomSaturate = parseInt(localStorage.getItem('riviftAeroCustomSaturate') || '180', 10);
+} catch (__riviftErr) { __riviftInitFail("L23694 let: let aeroCustomSaturate = parseInt(localStorage.getItem('rivi", __riviftErr); }
             function saveAeroCustomParams() {
                 localStorage.setItem('riviftAeroCustomOpacity', aeroCustomOpacity);
                 localStorage.setItem('riviftAeroCustomBlur', aeroCustomBlur);
                 localStorage.setItem('riviftAeroCustomSaturate', aeroCustomSaturate);
             }
-            let systemVolume = parseInt(localStorage.getItem('riviftSystemVolume')) || 50;
-            let systemBrightness = parseInt(localStorage.getItem('riviftSystemBrightness')) || 100;
-            let desktopWidgets = JSON.parse(localStorage.getItem('riviftDesktopWidgets')) || [];
-            let desktopIcons = JSON.parse(localStorage.getItem('riviftDesktopIcons')) || [];
-            window.showDesktopIndicator = JSON.parse(localStorage.getItem('riviftShowDesktopIndicator')) !== false;
+            let systemVolume; try { systemVolume = parseInt(localStorage.getItem('riviftSystemVolume')) || 50;
+} catch (__riviftErr) { __riviftInitFail("L23700 let: let systemVolume = parseInt(localStorage.getItem('riviftSyst", __riviftErr); }
+            let systemBrightness; try { systemBrightness = parseInt(localStorage.getItem('riviftSystemBrightness')) || 100;
+} catch (__riviftErr) { __riviftInitFail("L23701 let: let systemBrightness = parseInt(localStorage.getItem('rivift", __riviftErr); }
+            let desktopWidgets; try { desktopWidgets = __lsParse(localStorage.getItem('riviftDesktopWidgets')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23702 let: let desktopWidgets = __lsParse(localStorage.getItem('riviftD", __riviftErr); }
+            let desktopIcons; try { desktopIcons = __lsParse(localStorage.getItem('riviftDesktopIcons')) || [];
+} catch (__riviftErr) { __riviftInitFail("L23703 let: let desktopIcons = __lsParse(localStorage.getItem('riviftDes", __riviftErr); }
+            try { window.showDesktopIndicator = __lsParse(localStorage.getItem('riviftShowDesktopIndicator')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23704 Expression: window.showDesktopIndicator = __lsParse(localStorage.getItem", __riviftErr); }
             function saveShowDesktopIndicator() { localStorage.setItem('riviftShowDesktopIndicator', JSON.stringify(window.showDesktopIndicator)); }
-            let appNotificationSettings = JSON.parse(localStorage.getItem('riviftAppNotificationSettings')) || {};
+            let appNotificationSettings; try { appNotificationSettings = __lsParse(localStorage.getItem('riviftAppNotificationSettings')) || {};
+} catch (__riviftErr) { __riviftInitFail("L23706 let: let appNotificationSettings = __lsParse(localStorage.getItem", __riviftErr); }
             function saveAppNotificationSettings() { localStorage.setItem('riviftAppNotificationSettings', JSON.stringify(appNotificationSettings)); }
 
             const APP_PERMISSIONS = {
@@ -23735,9 +23957,11 @@ VFS.init();
                 'animator-studio': ['filesystem'],
                 'app-creator': ['filesystem'],
             };
-            const APP_DEFAULT_GRANTED_PERMISSIONS = new Set(['filesystem', 'notifications']);
+            let APP_DEFAULT_GRANTED_PERMISSIONS; try { APP_DEFAULT_GRANTED_PERMISSIONS = new Set(['filesystem', 'notifications']);
+} catch (__riviftErr) { __riviftInitFail("L23738 const: const APP_DEFAULT_GRANTED_PERMISSIONS = new Set(['filesystem", __riviftErr); }
 
-            let appPermissions = JSON.parse(localStorage.getItem('riviftAppPermissions')) || {};
+            let appPermissions; try { appPermissions = __lsParse(localStorage.getItem('riviftAppPermissions')) || {};
+} catch (__riviftErr) { __riviftInitFail("L23740 let: let appPermissions = __lsParse(localStorage.getItem('riviftA", __riviftErr); }
             function saveAppPermissions() { localStorage.setItem('riviftAppPermissions', JSON.stringify(appPermissions)); }
 
             function getPermission(appId, permName) {
@@ -23836,9 +24060,12 @@ VFS.init();
                 }
             }
 
-            let lockScreenShowWeather = JSON.parse(localStorage.getItem('riviftLockScreenShowWeather')) !== false;
-            let lockScreenShowCalendar = JSON.parse(localStorage.getItem('riviftLockScreenShowCalendar')) !== false;
-            let lockScreenShowMusic = JSON.parse(localStorage.getItem('riviftLockScreenShowMusic')) !== false;
+            let lockScreenShowWeather; try { lockScreenShowWeather = __lsParse(localStorage.getItem('riviftLockScreenShowWeather')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23839 let: let lockScreenShowWeather = __lsParse(localStorage.getItem('", __riviftErr); }
+            let lockScreenShowCalendar; try { lockScreenShowCalendar = __lsParse(localStorage.getItem('riviftLockScreenShowCalendar')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23840 let: let lockScreenShowCalendar = __lsParse(localStorage.getItem(", __riviftErr); }
+            let lockScreenShowMusic; try { lockScreenShowMusic = __lsParse(localStorage.getItem('riviftLockScreenShowMusic')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L23841 let: let lockScreenShowMusic = __lsParse(localStorage.getItem('ri", __riviftErr); }
             function saveLockScreenSettings() {
                 localStorage.setItem('riviftLockScreenShowWeather', JSON.stringify(lockScreenShowWeather));
                 localStorage.setItem('riviftLockScreenShowCalendar', JSON.stringify(lockScreenShowCalendar));
@@ -23905,7 +24132,7 @@ VFS.init();
                 }
             }
 
-            let userIcon = JSON.parse(localStorage.getItem('riviftUserIcon_v3')) || {
+            let userIcon; try { userIcon = __lsParse(localStorage.getItem('riviftUserIcon_v3')) || {
                 mode: 'simple',
                 simpleUrl: defaultUserIcons[0],
                 composite: {
@@ -23915,7 +24142,9 @@ VFS.init();
                     accessory: null
                 }
             };
-            let userName = localStorage.getItem('riviftUserName') || 'Guest';
+} catch (__riviftErr) { __riviftInitFail("L23908 let: let userIcon = __lsParse(localStorage.getItem('riviftUserIco", __riviftErr); }
+            let userName; try { userName = localStorage.getItem('riviftUserName') || 'Guest';
+} catch (__riviftErr) { __riviftInitFail("L23918 let: let userName = localStorage.getItem('riviftUserName') || 'Gu", __riviftErr); }
 
             function saveUserAccount() {
                 safeLocalStorageSet('riviftUserIcon_v3', JSON.stringify(userIcon));
@@ -24070,11 +24299,13 @@ VFS.init();
                 'wallpapers/Rivift OS 1.png',
                 'wallpapers/Rivift OS 1D.png',
             ];
-            let currentWallpaperIndex = defaultWallpapers.indexOf(currentWallpaper) !== -1 ? defaultWallpapers.indexOf(currentWallpaper) : 0;
+            let currentWallpaperIndex; try { currentWallpaperIndex = defaultWallpapers.indexOf(currentWallpaper) !== -1 ? defaultWallpapers.indexOf(currentWallpaper) : 0;
+} catch (__riviftErr) { __riviftInitFail("L24073 let: let currentWallpaperIndex = defaultWallpapers.indexOf(curren", __riviftErr); }
             let slideshowIntervalId = null;
 
-            window._appUnreadCounts = window._appUnreadCounts || {};
-            window.updateAppUnreadBadge = function (appId, count) {
+            try { window._appUnreadCounts = window._appUnreadCounts || {};
+} catch (__riviftErr) { __riviftInitFail("L24076 Expression: window._appUnreadCounts = window._appUnreadCounts || {};", __riviftErr); }
+            try { window.updateAppUnreadBadge = function (appId, count) {
                 window._appUnreadCounts[appId] = count;
                 const selector = `.taskbar-icon[data-app="${appId}"] .app-unread-badge, .mobile-dock-icon[data-app-id="${appId}"] .app-unread-badge, .app-icon-fullscreen[data-app="${appId}"] .app-unread-badge`;
                 document.querySelectorAll(selector).forEach(badge => {
@@ -24087,6 +24318,7 @@ VFS.init();
                     }
                 });
             };
+} catch (__riviftErr) { __riviftInitFail("L24077 Expression: window.updateAppUnreadBadge = function (appId, count) { wind", __riviftErr); }
 
             function savePinnedApps() {
                 localStorage.setItem('riviftPinnedApps', JSON.stringify(pinnedApps));
@@ -24646,7 +24878,7 @@ VFS.init();
             function loadAccentColorSettings() {
                 accentColorMode = localStorage.getItem('riviftAccentColorMode') || 'preset';
                 currentAccentColor = localStorage.getItem('riviftCurrentAccentColor') || '#007bff';
-                customAccentColors = JSON.parse(localStorage.getItem('riviftCustomAccentColors')) || [];
+                customAccentColors = __lsParse(localStorage.getItem('riviftCustomAccentColors')) || [];
             }
 
             function generateColorVariants(hex) {
@@ -24873,12 +25105,14 @@ VFS.init();
                 document.body.removeEventListener('keydown', unlockAudioAndPlayDeferred, true);
             }
 
-            document.body.addEventListener('click', unlockAudioAndPlayDeferred, true);
-            document.body.addEventListener('keydown', unlockAudioAndPlayDeferred, true);
+            try { document.body.addEventListener('click', unlockAudioAndPlayDeferred, true);
+} catch (__riviftErr) { __riviftInitFail("L24876 Expression: document.body.addEventListener('click', unlockAudioAndPlayDe", __riviftErr); }
+            try { document.body.addEventListener('keydown', unlockAudioAndPlayDeferred, true);
+} catch (__riviftErr) { __riviftInitFail("L24877 Expression: document.body.addEventListener('keydown', unlockAudioAndPlay", __riviftErr); }
 
             const CUSTOM_SOUND_KEY = 'riviftCustomSoundPaths';
             const customSoundCache = {};
-            const getCustomSoundPaths = () => { try { return JSON.parse(localStorage.getItem(CUSTOM_SOUND_KEY) || '{}') || {}; } catch (_) { return {}; } };
+            const getCustomSoundPaths = () => { try { return __lsParse(localStorage.getItem(CUSTOM_SOUND_KEY), {}) || {}; } catch (_) { return {}; } };
             const setCustomSoundPath = (name, path) => {
                 const m = getCustomSoundPaths();
                 if (path) m[name] = path; else delete m[name];
@@ -24896,7 +25130,8 @@ VFS.init();
                 } catch (e) { console.warn(`[Sound] カスタム音の読み込みに失敗 (${name}):`, e); }
                 return null;
             };
-            window.RiviftSounds = { getPaths: getCustomSoundPaths, setPath: setCustomSoundPath, defaults: soundMap, resolve: async (n) => (await resolveCustomSoundSrc(n)) || soundMap[n] };
+            try { window.RiviftSounds = { getPaths: getCustomSoundPaths, setPath: setCustomSoundPath, defaults: soundMap, resolve: async (n) => (await resolveCustomSoundSrc(n)) || soundMap[n] };
+} catch (__riviftErr) { __riviftInitFail("L24899 Expression: window.RiviftSounds = { getPaths: getCustomSoundPaths, setPa", __riviftErr); }
 
             function _playAudioSrc(src, soundName, fallbackSrc) {
                 try {
@@ -24934,7 +25169,8 @@ VFS.init();
                 }
                 _playAudioSrc(filePath, soundName, null);
             }
-            window.RiviftPlaySound = playSound;
+            try { window.RiviftPlaySound = playSound;
+} catch (__riviftErr) { __riviftInitFail("L24937 Expression: window.RiviftPlaySound = playSound;", __riviftErr); }
 
             let activeModalContext = null;
 
@@ -24974,12 +25210,13 @@ VFS.init();
                 activeModalContext = null; // 呼び出し元情報をリセット
             }
 
-            messageBoxOverlay.addEventListener('click', (e) => {
+            try { messageBoxOverlay.addEventListener('click', (e) => {
                 if (e.target !== messageBoxOverlay) return; // #message-box内側のクリックは無視
                 if (!messageBoxCancel.classList.contains('hidden')) {
                     messageBoxCancel.click();
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L24977 Expression: messageBoxOverlay.addEventListener('click', (e) => { if (e.t", __riviftErr); }
 
             function showMessageBox(title, message, options = {}) {
                 const { showCancel = false, isNetworkError = false, customHtmlContent = null, input = null, type = 'alert' } = options;
@@ -25055,7 +25292,8 @@ VFS.init();
                 });
             }
 
-            const snapPopup = document.getElementById('snap-layouts-popup');
+            let snapPopup; try { snapPopup = document.getElementById('snap-layouts-popup');
+} catch (__riviftErr) { __riviftInitFail("L25058 const: const snapPopup = document.getElementById('snap-layouts-popu", __riviftErr); }
             let snapShowTimeout = null;
             function showSnapPopup(maximizeBtn, windowEl) {
                 clearTimeout(snapHideTimeout);
@@ -25099,10 +25337,12 @@ VFS.init();
                 }, 200); // 0.2秒待ってから隠す
             }
 
-            snapPopup.addEventListener('mouseenter', () => clearTimeout(snapHideTimeout));
-            snapPopup.addEventListener('mouseleave', hideSnapPopup);
+            try { snapPopup.addEventListener('mouseenter', () => clearTimeout(snapHideTimeout));
+} catch (__riviftErr) { __riviftInitFail("L25102 Expression: snapPopup.addEventListener('mouseenter', () => clearTimeout(", __riviftErr); }
+            try { snapPopup.addEventListener('mouseleave', hideSnapPopup);
+} catch (__riviftErr) { __riviftInitFail("L25103 Expression: snapPopup.addEventListener('mouseleave', hideSnapPopup);", __riviftErr); }
 
-            snapPopup.addEventListener('click', (e) => {
+            try { snapPopup.addEventListener('click', (e) => {
                 const option = e.target.closest('.snap-layout-option');
                 if (option && activeSnapWindow) {
                     const layout = option.dataset.layout;
@@ -25111,8 +25351,9 @@ VFS.init();
                     activeSnapWindow = null;
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L25105 Expression: snapPopup.addEventListener('click', (e) => { const option = ", __riviftErr); }
 
-            setInterval(() => {
+            try { setInterval(() => {
                 const now = Date.now();
 
                 [...notifications].forEach(notification => {
@@ -25121,6 +25362,7 @@ VFS.init();
                     }
                 });
             }, 1000);
+} catch (__riviftErr) { __riviftInitFail("L25115 Expression: setInterval(() => { const now = Date.now(); [...notification", __riviftErr); }
 
             function createNotification(title, message, type = 'info', duration = notificationDismissTime, onSnooze = null, onDismiss = null, appId = null, actionButton = null) {
                 if (!desktopNotificationsEnabled) return;
@@ -25192,7 +25434,7 @@ VFS.init();
 
             function updateNotificationSystem() { }
 
-            if (desktopNotificationsContainer) {
+            try { if (desktopNotificationsContainer) {
                 desktopNotificationsContainer.addEventListener('click', (e) => {
                     const closeBtn = e.target.closest('.desktop-notification-close-btn');
                     if (closeBtn) {
@@ -25201,6 +25443,7 @@ VFS.init();
                     }
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L25195 If: if (desktopNotificationsContainer) { desktopNotificationsCon", __riviftErr); }
 
             function updateTaskbarAppStatus() {
                 const activeDesktop = RiviftOS.desktopManager.getActiveDesktop();
@@ -25288,7 +25531,8 @@ VFS.init();
             let taskbarDodgeRAF = null;      // requestAnimationFrame のスロットリング用ID
             let taskbarDodgePendingX = null; // 直近のカーソルX（rAFで処理する分）
             let taskbarCurrentTargetIdx = -1; // 直近で計算・表示されているドロップ先インデックス
-            window._taskbarJustDragged = false; // ドラッグ直後の誤クリック起動防止
+            try { window._taskbarJustDragged = false;
+} catch (__riviftErr) { __riviftInitFail("L25291 Expression: window._taskbarJustDragged = false;", __riviftErr); } // ドラッグ直後の誤クリック起動防止
 
             function captureTaskbarDodgeBaseline() {
                 const taskbarCenter = document.getElementById('taskbar-center');
@@ -25390,7 +25634,7 @@ VFS.init();
                 }
             }
 
-            (function setupTaskbarDragLeaveCleanup() {
+            try { (function setupTaskbarDragLeaveCleanup() {
                 const taskbarCenter = document.getElementById('taskbar-center');
                 if (!taskbarCenter) return;
                 taskbarCenter.addEventListener('dragleave', (e) => {
@@ -25404,6 +25648,7 @@ VFS.init();
                     }
                 });
             })();
+} catch (__riviftErr) { __riviftInitFail("L25393 Expression: (function setupTaskbarDragLeaveCleanup() { const taskbarCent", __riviftErr); }
 
             function handleTaskbarDrop(e) {
                 e.preventDefault();
@@ -26136,7 +26381,7 @@ VFS.init();
                 updateAllQsToggles();
             }
 
-            window.RiviftThemeState = {
+            try { window.RiviftThemeState = {
                 isDarkMode: () => isDarkMode,
                 toggleDarkMode: () => {
                     isDarkMode = !isDarkMode;
@@ -26182,6 +26427,7 @@ VFS.init();
                     return notificationSoundEnabled;
                 }
             };
+} catch (__riviftErr) { __riviftInitFail("L26139 Expression: window.RiviftThemeState = { isDarkMode: () => isDarkMode, to", __riviftErr); }
 
             function togglePanel(panel, otherPanel) {
                 if (isLocked) return;
@@ -26468,12 +26714,17 @@ VFS.init();
                 }
             }
 
-            const spotlightOverlay = document.getElementById('spotlight-overlay');
-            const spotlightInput = document.getElementById('spotlight-input');
-            const spotlightResults = document.getElementById('spotlight-results');
-            const spotlightBtn = document.getElementById('spotlight-btn');
+            let spotlightOverlay; try { spotlightOverlay = document.getElementById('spotlight-overlay');
+} catch (__riviftErr) { __riviftInitFail("L26471 const: const spotlightOverlay = document.getElementById('spotlight-", __riviftErr); }
+            let spotlightInput; try { spotlightInput = document.getElementById('spotlight-input');
+} catch (__riviftErr) { __riviftInitFail("L26472 const: const spotlightInput = document.getElementById('spotlight-in", __riviftErr); }
+            let spotlightResults; try { spotlightResults = document.getElementById('spotlight-results');
+} catch (__riviftErr) { __riviftInitFail("L26473 const: const spotlightResults = document.getElementById('spotlight-", __riviftErr); }
+            let spotlightBtn; try { spotlightBtn = document.getElementById('spotlight-btn');
+} catch (__riviftErr) { __riviftInitFail("L26474 const: const spotlightBtn = document.getElementById('spotlight-btn'", __riviftErr); }
             let spotlightVisible = false;
-            let showSpotlightButton = JSON.parse(localStorage.getItem('riviftShowSpotlightButton')) !== false;
+            let showSpotlightButton; try { showSpotlightButton = __lsParse(localStorage.getItem('riviftShowSpotlightButton')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L26476 let: let showSpotlightButton = __lsParse(localStorage.getItem('ri", __riviftErr); }
             let currentSearchId = 0;
 
             function applySpotlightButtonVisibility() {
@@ -26483,7 +26734,8 @@ VFS.init();
                 localStorage.setItem('riviftShowSpotlightButton', JSON.stringify(showSpotlightButton));
             }
 
-            let showMissionControlButton = JSON.parse(localStorage.getItem('riviftShowMissionControlButton')) !== false;
+            let showMissionControlButton; try { showMissionControlButton = __lsParse(localStorage.getItem('riviftShowMissionControlButton')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L26486 let: let showMissionControlButton = __lsParse(localStorage.getIte", __riviftErr); }
             function applyMissionControlButtonVisibility() {
                 const apply = () => document.body.classList.toggle('hide-mission-control-btn', !showMissionControlButton);
                 if (document.body) apply(); else document.addEventListener('DOMContentLoaded', apply, { once: true });
@@ -26491,9 +26743,11 @@ VFS.init();
             function saveShowMissionControlButton() {
                 localStorage.setItem('riviftShowMissionControlButton', JSON.stringify(showMissionControlButton));
             }
-            applyMissionControlButtonVisibility();
+            try { applyMissionControlButtonVisibility();
+} catch (__riviftErr) { __riviftInitFail("L26494 Expression: applyMissionControlButtonVisibility();", __riviftErr); }
 
-            let showAIButton = JSON.parse(localStorage.getItem('riviftShowAIButton')) !== false;
+            let showAIButton; try { showAIButton = __lsParse(localStorage.getItem('riviftShowAIButton')) !== false;
+} catch (__riviftErr) { __riviftInitFail("L26496 let: let showAIButton = __lsParse(localStorage.getItem('riviftSho", __riviftErr); }
             function applyAIButtonVisibility() {
                 const btn = document.getElementById('ai-taskbar-btn');
                 const aiDisabled = localStorage.getItem('riviftAIDisabled') === 'true';
@@ -26570,7 +26824,8 @@ VFS.init();
 
             const FS_ACCESS_PATH = '/System/Permissions';
             const FS_ACCESS_FILE = 'fs-access.json';
-            window._fsSessionGrants = window._fsSessionGrants || new Map();
+            try { window._fsSessionGrants = window._fsSessionGrants || new Map();
+} catch (__riviftErr) { __riviftInitFail("L26573 Expression: window._fsSessionGrants = window._fsSessionGrants || new Map", __riviftErr); }
 
             function normalizePath(path) {
                 if (!path || typeof path !== 'string') return '/';
@@ -26769,7 +27024,7 @@ VFS.init();
                 });
             }
 
-            window.addEventListener('message', (event) => {
+            try { window.addEventListener('message', (event) => {
                 const d = event.data;
                 if (!d || d.type !== 'rivift-preview-log' || !d.previewId) return;
                 const ownerIframe = window.__previewOwners && window.__previewOwners[d.previewId];
@@ -26786,6 +27041,7 @@ VFS.init();
                     }, '*');
                 } catch (e) { /* ignore */ }
             });
+} catch (__riviftErr) { __riviftInitFail("L26772 Expression: window.addEventListener('message', (event) => { const d = ev", __riviftErr); }
 
             async function bootAppsFromVFS() {
                             let appFolders;
@@ -27499,12 +27755,16 @@ VFS.init();
             }
 
             let aiConversationHistory = [];
-            const spotlightAiBlock = document.getElementById('spotlight-ai-block');
-            const spotlightAiMessages = document.getElementById('spotlight-ai-messages');
-            const aiReplyInput = document.getElementById('spotlight-ai-reply-input');
-            const aiReplyBtn = document.getElementById('spotlight-ai-reply-btn');
+            let spotlightAiBlock; try { spotlightAiBlock = document.getElementById('spotlight-ai-block');
+} catch (__riviftErr) { __riviftInitFail("L27502 const: const spotlightAiBlock = document.getElementById('spotlight-", __riviftErr); }
+            let spotlightAiMessages; try { spotlightAiMessages = document.getElementById('spotlight-ai-messages');
+} catch (__riviftErr) { __riviftInitFail("L27503 const: const spotlightAiMessages = document.getElementById('spotlig", __riviftErr); }
+            let aiReplyInput; try { aiReplyInput = document.getElementById('spotlight-ai-reply-input');
+} catch (__riviftErr) { __riviftInitFail("L27504 const: const aiReplyInput = document.getElementById('spotlight-ai-r", __riviftErr); }
+            let aiReplyBtn; try { aiReplyBtn = document.getElementById('spotlight-ai-reply-btn');
+} catch (__riviftErr) { __riviftInitFail("L27505 const: const aiReplyBtn = document.getElementById('spotlight-ai-rep", __riviftErr); }
 
-            (function() {
+            try { (function() {
                 if (!document.getElementById('rivift-live-pointer-styles')) {
                     const styleEl = document.createElement('style');
                     styleEl.id = 'rivift-live-pointer-styles';
@@ -32120,6 +32380,7 @@ VFS.init();
                     wrapMethod('executeScreenAssistInstruction', err => ({ handled: true, message: `操作に失敗しました: ${err && err.message ? err.message : err}` }));
                 })();
             })();
+} catch (__riviftErr) { __riviftInitFail("L27507 Expression: (function() { if (!document.getElementById('rivift-live-poin", __riviftErr); }
 
             const _OS_APP_ALIASES = {
                 'ファイル': 'files', 'files': 'files', 'file': 'files', 'ファイルマネージャー': 'files', 'explorer': 'files',
@@ -32329,7 +32590,7 @@ VFS.init();
                 if (localStorage.getItem('riviftAIUsageHistory') !== 'true') return;
                 if (!appId) return;
                 try {
-                    const log = JSON.parse(localStorage.getItem(USAGE_HISTORY_KEY) || '[]');
+                    const log = __lsParse(localStorage.getItem(USAGE_HISTORY_KEY), []);
                     log.push({ appId, hour: new Date().getHours(), ts: Date.now() });
                     while (log.length > USAGE_HISTORY_MAX) log.shift();
                     localStorage.setItem(USAGE_HISTORY_KEY, JSON.stringify(log));
@@ -32337,7 +32598,7 @@ VFS.init();
             }
             function _summarizeUsageHistory() {
                 let log = [];
-                try { log = JSON.parse(localStorage.getItem(USAGE_HISTORY_KEY) || '[]'); } catch { }
+                try { log = __lsParse(localStorage.getItem(USAGE_HISTORY_KEY), []); } catch { }
                 const appCounts = {};
                 const hourCounts = {};
                 const appHourCounts = {};
@@ -32978,7 +33239,7 @@ self.onmessage = async (e) => {
                 return URL.createObjectURL(blob);
             }
 
-            if (!window.__riviftWebLLMWorkerState) {
+            try { if (!window.__riviftWebLLMWorkerState) {
                 window.__riviftWebLLMWorkerState = {
                     worker: null,
                     modelId: null,
@@ -32990,6 +33251,7 @@ self.onmessage = async (e) => {
                     _blobUrl: null,
                 };
             }
+} catch (__riviftErr) { __riviftInitFail("L32981 If: if (!window.__riviftWebLLMWorkerState) { window.__riviftWebL", __riviftErr); }
 
             async function _getOrCreateLLMWorker(forceCDN = false) {
                 const state = window.__riviftWebLLMWorkerState;
@@ -33079,9 +33341,10 @@ self.onmessage = async (e) => {
                 });
                 state.worker.postMessage({ type: 'INTERRUPT', reqId: 'interrupt_' + Date.now() });
             }
-            window._riviftInterruptAI = interruptAIGeneration;
+            try { window._riviftInterruptAI = interruptAIGeneration;
+} catch (__riviftErr) { __riviftInitFail("L33082 Expression: window._riviftInterruptAI = interruptAIGeneration;", __riviftErr); }
 
-            if (!window.__riviftWebLLMCache) {
+            try { if (!window.__riviftWebLLMCache) {
                 window.__riviftWebLLMCache = {
                     engine: null,
                     modelId: null,
@@ -33090,8 +33353,9 @@ self.onmessage = async (e) => {
                     queue: [],
                 };
             }
+} catch (__riviftErr) { __riviftInitFail("L33084 If: if (!window.__riviftWebLLMCache) { window.__riviftWebLLMCach", __riviftErr); }
 
-            const RIVIFT_LOCAL_MODELS = {
+            let RIVIFT_LOCAL_MODELS; try { RIVIFT_LOCAL_MODELS = {
                 'gemma-2-2b-it-q4f16_1-MLC': {
                     hf: 'https://huggingface.co/mlc-ai/gemma-2-2b-it-q4f16_1-MLC',
                     wasm: new URL('lib/wasm/gemma-2-2b-it-q4f16_1-ctx4k_cs1k-webgpu.wasm', location.href).href,
@@ -33108,6 +33372,7 @@ self.onmessage = async (e) => {
                     vram: 6200,
                 },
             };
+} catch (__riviftErr) { __riviftInitFail("L33094 const: const RIVIFT_LOCAL_MODELS = { 'gemma-2-2b-it-q4f16_1-MLC': {", __riviftErr); }
 
             const RIVIFT_CHAT_MODEL_ID = 'gemma-2-2b-it-q4f16_1-MLC';
             const RIVIFT_CODE_MODEL_ID = 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC';
@@ -33335,10 +33600,11 @@ self.onmessage = async (e) => {
                 }
             }
 
-            window.__riviftMainThreadLLM = window.__riviftMainThreadLLM || {
+            try { window.__riviftMainThreadLLM = window.__riviftMainThreadLLM || {
                 engines: {},   // modelId → engine
                 loading: {},   // modelId → Promise
             };
+} catch (__riviftErr) { __riviftInitFail("L33338 Expression: window.__riviftMainThreadLLM = window.__riviftMainThreadLLM ", __riviftErr); }
 
             let _mainThreadFetchOriginal = null;
             function _installModelsDirFetchHook(handle) {
@@ -33654,7 +33920,8 @@ self.onmessage = async (e) => {
             }
 
             const AI_EXPAND_THRESHOLD = 4; // メッセージ数がこれを超えたら展開ボタンを表示
-            const aiExpandBtn = document.getElementById('ai-expand-btn');
+            let aiExpandBtn; try { aiExpandBtn = document.getElementById('ai-expand-btn');
+} catch (__riviftErr) { __riviftInitFail("L33657 const: const aiExpandBtn = document.getElementById('ai-expand-btn')", __riviftErr); }
 
             function riviftEscapeHtml(s) {
                 return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33861,7 +34128,8 @@ self.onmessage = async (e) => {
                 }
             };
 
-            window.RiviftProfessionalAgentCore = RiviftProfessionalAgentCore;
+            try { window.RiviftProfessionalAgentCore = RiviftProfessionalAgentCore;
+} catch (__riviftErr) { __riviftInitFail("L33864 Expression: window.RiviftProfessionalAgentCore = RiviftProfessionalAgent", __riviftErr); }
 
             const SYNONYM_DICTIONARY = {
                 send: ['送信', '送る', '発信', '投稿', 'send', 'submit', 'post', 'deliver'],
@@ -34154,12 +34422,13 @@ self.onmessage = async (e) => {
                 return null;
             }
 
-            window.RiviftFindOrExploreElement = findOrExploreElement;
+            try { window.RiviftFindOrExploreElement = findOrExploreElement;
+} catch (__riviftErr) { __riviftInitFail("L34157 Expression: window.RiviftFindOrExploreElement = findOrExploreElement;", __riviftErr); }
 
             async function getRecentOrLibraryMusic(count = 3) {
                 let list = [];
                 try {
-                    const stored = JSON.parse(localStorage.getItem('riviftRecentMusic') || '[]');
+                    const stored = __lsParse(localStorage.getItem('riviftRecentMusic'), []);
                     if (Array.isArray(stored)) {
                         for (const s of stored) {
                             if (s && s.name && !list.some(x => x.name === s.name)) {
@@ -34239,7 +34508,8 @@ self.onmessage = async (e) => {
                 }
                 return list.slice(0, count);
             }
-            window.getRecentOrLibraryMusic = getRecentOrLibraryMusic;
+            try { window.getRecentOrLibraryMusic = getRecentOrLibraryMusic;
+} catch (__riviftErr) { __riviftInitFail("L34242 Expression: window.getRecentOrLibraryMusic = getRecentOrLibraryMusic;", __riviftErr); }
 
             function planAutonomousWorkflow(text) {
                 if (!text || typeof text !== 'string') return null;
@@ -34295,7 +34565,8 @@ self.onmessage = async (e) => {
                 }
                 return null;
             }
-            window.planAutonomousWorkflow = planAutonomousWorkflow;
+            try { window.planAutonomousWorkflow = planAutonomousWorkflow;
+} catch (__riviftErr) { __riviftInitFail("L34298 Expression: window.planAutonomousWorkflow = planAutonomousWorkflow;", __riviftErr); }
 
             function detectAndSplitMultipleTasks(text) {
                 if (!text || typeof text !== 'string') return [];
@@ -35247,8 +35518,9 @@ self.onmessage = async (e) => {
             const _origToggleSpotlight = toggleSpotlight;
             const _origToggle = toggleSpotlight;
 
-            const spotlightAiReplyForm = document.getElementById('spotlight-ai-reply-row');
-            if (spotlightAiReplyForm) {
+            let spotlightAiReplyForm; try { spotlightAiReplyForm = document.getElementById('spotlight-ai-reply-row');
+} catch (__riviftErr) { __riviftInitFail("L35250 const: const spotlightAiReplyForm = document.getElementById('spotli", __riviftErr); }
+            try { if (spotlightAiReplyForm) {
                 spotlightAiReplyForm.addEventListener('submit', (e) => {
                     e.preventDefault();
                     if (aiReplyBtn?.disabled) return;
@@ -35258,14 +35530,22 @@ self.onmessage = async (e) => {
                     askLocalAI(val);
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L35251 If: if (spotlightAiReplyForm) { spotlightAiReplyForm.addEventLis", __riviftErr); }
 
-            const aiFullOverlay = document.getElementById('ai-fullwindow-overlay');
-            const aiFullMsgs = document.getElementById('ai-fullwindow-messages');
-            const aiFullChipsRow = document.getElementById('ai-fullwindow-chips-row');
-            const aiFullInput = document.getElementById('ai-fullwindow-input');
-            const aiFullForm = document.getElementById('ai-fullwindow-input-row');
-            const aiFullSend = document.getElementById('ai-fullwindow-send');
-            const aiFullClose = document.getElementById('ai-fullwindow-close');
+            let aiFullOverlay; try { aiFullOverlay = document.getElementById('ai-fullwindow-overlay');
+} catch (__riviftErr) { __riviftInitFail("L35262 const: const aiFullOverlay = document.getElementById('ai-fullwindow", __riviftErr); }
+            let aiFullMsgs; try { aiFullMsgs = document.getElementById('ai-fullwindow-messages');
+} catch (__riviftErr) { __riviftInitFail("L35263 const: const aiFullMsgs = document.getElementById('ai-fullwindow-me", __riviftErr); }
+            let aiFullChipsRow; try { aiFullChipsRow = document.getElementById('ai-fullwindow-chips-row');
+} catch (__riviftErr) { __riviftInitFail("L35264 const: const aiFullChipsRow = document.getElementById('ai-fullwindo", __riviftErr); }
+            let aiFullInput; try { aiFullInput = document.getElementById('ai-fullwindow-input');
+} catch (__riviftErr) { __riviftInitFail("L35265 const: const aiFullInput = document.getElementById('ai-fullwindow-i", __riviftErr); }
+            let aiFullForm; try { aiFullForm = document.getElementById('ai-fullwindow-input-row');
+} catch (__riviftErr) { __riviftInitFail("L35266 const: const aiFullForm = document.getElementById('ai-fullwindow-in", __riviftErr); }
+            let aiFullSend; try { aiFullSend = document.getElementById('ai-fullwindow-send');
+} catch (__riviftErr) { __riviftInitFail("L35267 const: const aiFullSend = document.getElementById('ai-fullwindow-se", __riviftErr); }
+            let aiFullClose; try { aiFullClose = document.getElementById('ai-fullwindow-close');
+} catch (__riviftErr) { __riviftInitFail("L35268 const: const aiFullClose = document.getElementById('ai-fullwindow-c", __riviftErr); }
             let aiFullHistory = [];
 
             const AI_CHATS_DIR = '/System/AI/Chats';
@@ -35471,7 +35751,7 @@ self.onmessage = async (e) => {
               </div>
             `;
 
-            if (!document.getElementById('ai-win-chip-style')) {
+            try { if (!document.getElementById('ai-win-chip-style')) {
                 const _s = document.createElement('style');
                 _s.id = 'ai-win-chip-style';
                 _s.textContent = `
@@ -35523,6 +35803,7 @@ self.onmessage = async (e) => {
                 `;
                 document.head.appendChild(_s);
             }
+} catch (__riviftErr) { __riviftInitFail("L35474 If: if (!document.getElementById('ai-win-chip-style')) { const _", __riviftErr); }
 
             async function generateFollowUpQuestions(assistantAnswer, recentHistory, chipsContainer) {
                 if (!chipsContainer) return;
@@ -36215,7 +36496,7 @@ ${assistantAnswer.slice(0, 1000)}
                 requestAnimationFrame(() => winInput?.focus());
             }
 
-            if (aiExpandBtn) {
+            try { if (aiExpandBtn) {
                 aiExpandBtn.addEventListener('click', () => {
                     aiFullHistory = aiConversationHistory.map(m => ({ ...m }));
                     currentConversationMeta = null; // 未保存の新しい会話としてAIウィンドウ側に引き継ぐ
@@ -36229,8 +36510,9 @@ ${assistantAnswer.slice(0, 1000)}
                     }
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L36218 If: if (aiExpandBtn) { aiExpandBtn.addEventListener('click', () ", __riviftErr); }
 
-            if (aiFullForm) {
+            try { if (aiFullForm) {
                 aiFullForm.addEventListener('submit', (e) => {
                     e.preventDefault();
                     if (aiFullSend?.disabled) return;
@@ -36238,8 +36520,9 @@ ${assistantAnswer.slice(0, 1000)}
                     if (v) askFullWindow(v);
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L36233 If: if (aiFullForm) { aiFullForm.addEventListener('submit', (e) ", __riviftErr); }
 
-            if (aiFullChipsRow) {
+            try { if (aiFullChipsRow) {
                 aiFullChipsRow.addEventListener('click', (e) => {
                     const chip = e.target.closest('.ai-win-chip');
                     if (chip && chip.dataset.prompt && aiFullInput) {
@@ -36249,8 +36532,9 @@ ${assistantAnswer.slice(0, 1000)}
                     }
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L36242 If: if (aiFullChipsRow) { aiFullChipsRow.addEventListener('click", __riviftErr); }
 
-            if (aiFullChipsRow && aiFullHistory.length === 0) {
+            try { if (aiFullChipsRow && aiFullHistory.length === 0) {
                 const CHIPS = ['画面アシスト', 'ファイルを探索', '音楽を再生', 'メモ帳に自動入力', '設定を開く', 'ダークモード', 'できること'];
                 CHIPS.forEach(label => {
                     const chip = document.createElement('button');
@@ -36280,8 +36564,9 @@ ${assistantAnswer.slice(0, 1000)}
                     aiFullChipsRow.appendChild(chip);
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L36253 If: if (aiFullChipsRow && aiFullHistory.length === 0) { const CH", __riviftErr); }
 
-            if (aiFullInput) {
+            try { if (aiFullInput) {
                 let fullChipsCleared = false;
                 aiFullInput.addEventListener('input', () => {
                     if (!fullChipsCleared && aiFullInput.value.trim().length > 0 && aiFullChipsRow) {
@@ -36297,7 +36582,8 @@ ${assistantAnswer.slice(0, 1000)}
                     setTimeout(() => { aiFullInput.style.height = 'auto'; aiFullInput.style.height = Math.min(aiFullInput.scrollHeight, 120) + 'px'; }, 0);
                 });
             }
-            if (aiFullClose) aiFullClose.addEventListener('click', () => {
+} catch (__riviftErr) { __riviftInitFail("L36284 If: if (aiFullInput) { let fullChipsCleared = false; aiFullInput", __riviftErr); }
+            try { if (aiFullClose) aiFullClose.addEventListener('click', () => {
                 aiFullOverlay?.classList.remove('visible');
                 window._riviftInterruptAI?.();
                 const glow = document.getElementById('ai-edge-glow');
@@ -36308,21 +36594,27 @@ ${assistantAnswer.slice(0, 1000)}
                     if (panel) panel.style.top = '';
                 }
             });
-            if (aiFullOverlay) aiFullOverlay.addEventListener('click', (e) => { if (e.target === aiFullOverlay) aiFullOverlay.classList.remove('visible'); });
+} catch (__riviftErr) { __riviftInitFail("L36300 If: if (aiFullClose) aiFullClose.addEventListener('click', () =>", __riviftErr); }
+            try { if (aiFullOverlay) aiFullOverlay.addEventListener('click', (e) => { if (e.target === aiFullOverlay) aiFullOverlay.classList.remove('visible'); });
+} catch (__riviftErr) { __riviftInitFail("L36311 If: if (aiFullOverlay) aiFullOverlay.addEventListener('click', (", __riviftErr); }
 
-            window._riviftOpenAIWindow = openAIWindow;
+            try { window._riviftOpenAIWindow = openAIWindow;
+} catch (__riviftErr) { __riviftInitFail("L36313 Expression: window._riviftOpenAIWindow = openAIWindow;", __riviftErr); }
 
             function toggleSpotlightWithAIReset() {
                 const wasVisible = spotlightVisible;
                 _origToggle();
                 setTimeout(resetAiConversation, wasVisible ? 320 : 0);
             }
-            spotlightOverlay.removeEventListener('click', spotlightOverlay._closeHandler);
+            try { spotlightOverlay.removeEventListener('click', spotlightOverlay._closeHandler);
+} catch (__riviftErr) { __riviftInitFail("L36320 Expression: spotlightOverlay.removeEventListener('click', spotlightOverl", __riviftErr); }
 
-            window._riviftAskAI = askLocalAI;
-            window._riviftEnsureWebLLM = ensureWebLLM;
+            try { window._riviftAskAI = askLocalAI;
+} catch (__riviftErr) { __riviftInitFail("L36322 Expression: window._riviftAskAI = askLocalAI;", __riviftErr); }
+            try { window._riviftEnsureWebLLM = ensureWebLLM;
+} catch (__riviftErr) { __riviftInitFail("L36323 Expression: window._riviftEnsureWebLLM = ensureWebLLM;", __riviftErr); }
 
-            document.addEventListener('keydown', (e) => {
+            try { document.addEventListener('keydown', (e) => {
                 if ((e.metaKey || e.ctrlKey) && e.altKey) { // Win+Alt+Arrow に変更 (ブラウザのCtrl+Tabなどと競合しにくいため)
                     const currentIndex = RiviftOS.desktopManager.desktops.findIndex(d => d.id === RiviftOS.desktopManager.activeDesktopId);
                     if (e.key === 'ArrowLeft') {
@@ -36374,13 +36666,18 @@ ${assistantAnswer.slice(0, 1000)}
                     }
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L36325 Expression: document.addEventListener('keydown', (e) => { if ((e.metaKey", __riviftErr); }
 
-            spotlightOverlay.addEventListener('click', (e) => { if (e.target === spotlightOverlay) toggleSpotlight(); });
-            spotlightBtn.addEventListener('click', toggleSpotlight);
+            try { spotlightOverlay.addEventListener('click', (e) => { if (e.target === spotlightOverlay) toggleSpotlight(); });
+} catch (__riviftErr) { __riviftInitFail("L36378 Expression: spotlightOverlay.addEventListener('click', (e) => { if (e.ta", __riviftErr); }
+            try { spotlightBtn.addEventListener('click', toggleSpotlight);
+} catch (__riviftErr) { __riviftInitFail("L36379 Expression: spotlightBtn.addEventListener('click', toggleSpotlight);", __riviftErr); }
 
-            const aiTaskbarBtn = document.getElementById('ai-taskbar-btn');
-            const aiEdgeGlow = document.getElementById('ai-edge-glow');
-            if (aiTaskbarBtn) {
+            let aiTaskbarBtn; try { aiTaskbarBtn = document.getElementById('ai-taskbar-btn');
+} catch (__riviftErr) { __riviftInitFail("L36381 const: const aiTaskbarBtn = document.getElementById('ai-taskbar-btn", __riviftErr); }
+            let aiEdgeGlow; try { aiEdgeGlow = document.getElementById('ai-edge-glow');
+} catch (__riviftErr) { __riviftInitFail("L36382 const: const aiEdgeGlow = document.getElementById('ai-edge-glow');", __riviftErr); }
+            try { if (aiTaskbarBtn) {
                 aiTaskbarBtn.addEventListener('click', () => {
                     if (aiEdgeGlow) {
                         aiEdgeGlow.classList.remove('flash');
@@ -36419,8 +36716,9 @@ ${assistantAnswer.slice(0, 1000)}
                     }
                 });
             }
+} catch (__riviftErr) { __riviftInitFail("L36383 If: if (aiTaskbarBtn) { aiTaskbarBtn.addEventListener('click', (", __riviftErr); }
 
-            (() => {
+            try { (() => {
                 const panel = document.getElementById('ai-fullwindow');
                 const header = document.getElementById('ai-fullwindow-header');
                 if (!panel || !header) return;
@@ -36448,11 +36746,14 @@ ${assistantAnswer.slice(0, 1000)}
                     if (dragging) { dragging = false; document.body.style.userSelect = ''; }
                 });
             })();
+} catch (__riviftErr) { __riviftInitFail("L36423 Expression: (() => { const panel = document.getElementById('ai-fullwindo", __riviftErr); }
 
-            applySpotlightButtonVisibility();
-            applyAIButtonVisibility();
+            try { applySpotlightButtonVisibility();
+} catch (__riviftErr) { __riviftInitFail("L36452 Expression: applySpotlightButtonVisibility();", __riviftErr); }
+            try { applyAIButtonVisibility();
+} catch (__riviftErr) { __riviftInitFail("L36453 Expression: applyAIButtonVisibility();", __riviftErr); }
 
-            window.RiviftLayout = (() => {
+            try { window.RiviftLayout = (() => {
                 const BP_THRESHOLDS = [
                     { name: 'xs', maxW: 320 },
                     { name: 'sm', maxW: 480 },
@@ -36542,8 +36843,9 @@ ${assistantAnswer.slice(0, 1000)}
 
                 return { observe, unobserve, applyToWindow, calcBp, calcAr, calcSize };
             })();
+} catch (__riviftErr) { __riviftInitFail("L36455 Expression: window.RiviftLayout = (() => { const BP_THRESHOLDS = [ { nam", __riviftErr); }
 
-            (function injectRiviftLayoutCSS() {
+            try { (function injectRiviftLayoutCSS() {
                 const css = `
 /* ━━ RiviftLayout 共通レスポンシブCSS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
@@ -36715,6 +37017,7 @@ ${assistantAnswer.slice(0, 1000)}
                 st.textContent = css;
                 document.head.appendChild(st);
             })();
+} catch (__riviftErr) { __riviftInitFail("L36546 Expression: (function injectRiviftLayoutCSS() { const css = ` /* ━━ Rivi", __riviftErr); }
 
             /**
              * [MOBILE FIX] setWindowContentStyle
@@ -36756,7 +37059,8 @@ ${assistantAnswer.slice(0, 1000)}
                 if (appData) appData.state = 'active';
                 return true;
             }
-            window._reopenExistingWindowForMobile = _reopenExistingWindowForMobile;
+            try { window._reopenExistingWindowForMobile = _reopenExistingWindowForMobile;
+} catch (__riviftErr) { __riviftInitFail("L36759 Expression: window._reopenExistingWindowForMobile = _reopenExistingWindo", __riviftErr); }
 
             function _wrapCustomAppHtml(html) {
                 const errorCatcher = `<script>(function(){
@@ -37708,16 +38012,18 @@ ${assistantAnswer.slice(0, 1000)}
                 }
             }
 
-            window.addEventListener('resize', () => {
+            try { window.addEventListener('resize', () => {
                 document.querySelectorAll('.app-window').forEach(win => {
                     clampWindowPositionToViewport(win);
                     updateWindowContentLayout(win);
                 });
             });
+} catch (__riviftErr) { __riviftInitFail("L37711 Expression: window.addEventListener('resize', () => { document.querySele", __riviftErr); }
 
-            createWindow = AppWorkerRuntime.wrapCreateWindow(createWindow);
+            try { createWindow = AppWorkerRuntime.wrapCreateWindow(createWindow);
+} catch (__riviftErr) { __riviftInitFail("L37718 Expression: createWindow = AppWorkerRuntime.wrapCreateWindow(createWindo", __riviftErr); }
 
-            (function wrapCreateWindowForKernel() {
+            try { (function wrapCreateWindowForKernel() {
                 const _prevCreateWindow = createWindow;
                 createWindow = function (id, ...rest) {
                     const windowEl = _prevCreateWindow.apply(this, [id, ...rest]);
@@ -37734,6 +38040,7 @@ ${assistantAnswer.slice(0, 1000)}
                     return windowEl;
                 };
             })();
+} catch (__riviftErr) { __riviftInitFail("L37720 Expression: (function wrapCreateWindowForKernel() { const _prevCreateWin", __riviftErr); }
 
             function createWidget(type, initialData = {}) {
                 const def = widgetDefinitions[type];
@@ -38228,7 +38535,8 @@ ${assistantAnswer.slice(0, 1000)}
                 });
             }
 
-            let autoAlignWidgets = JSON.parse(localStorage.getItem('riviftAutoAlignWidgets')) || false;
+            let autoAlignWidgets; try { autoAlignWidgets = __lsParse(localStorage.getItem('riviftAutoAlignWidgets')) || false;
+} catch (__riviftErr) { __riviftInitFail("L38231 let: let autoAlignWidgets = __lsParse(localStorage.getItem('rivif", __riviftErr); }
             function saveAutoAlignWidgets() { localStorage.setItem('riviftAutoAlignWidgets', JSON.stringify(autoAlignWidgets)); }
 
             function toggleWidgetAlignment() {
@@ -38341,7 +38649,8 @@ ${assistantAnswer.slice(0, 1000)}
                 saveDesktopWidgets();
             }
 
-            window.isMissionControlActive = false;
+            try { window.isMissionControlActive = false;
+} catch (__riviftErr) { __riviftInitFail("L38344 Expression: window.isMissionControlActive = false;", __riviftErr); }
             let missionControlOverlay = null;
             const missionControlHandlers = new Map();
 
@@ -38937,12 +39246,18 @@ ${assistantAnswer.slice(0, 1000)}
                 }
             }
 
-            window.renderDesktopBar = renderDesktopBar;
-            window.layoutMissionControl = layoutMissionControl;
-            window.openMissionControl = openMissionControl;
-            window.closeMissionControl = closeMissionControl;
-            window.toggleMissionControl = toggleMissionControl;
-            window.refreshMissionControlWindows = refreshMissionControlWindows;
+            try { window.renderDesktopBar = renderDesktopBar;
+} catch (__riviftErr) { __riviftInitFail("L38940 Expression: window.renderDesktopBar = renderDesktopBar;", __riviftErr); }
+            try { window.layoutMissionControl = layoutMissionControl;
+} catch (__riviftErr) { __riviftInitFail("L38941 Expression: window.layoutMissionControl = layoutMissionControl;", __riviftErr); }
+            try { window.openMissionControl = openMissionControl;
+} catch (__riviftErr) { __riviftInitFail("L38942 Expression: window.openMissionControl = openMissionControl;", __riviftErr); }
+            try { window.closeMissionControl = closeMissionControl;
+} catch (__riviftErr) { __riviftInitFail("L38943 Expression: window.closeMissionControl = closeMissionControl;", __riviftErr); }
+            try { window.toggleMissionControl = toggleMissionControl;
+} catch (__riviftErr) { __riviftInitFail("L38944 Expression: window.toggleMissionControl = toggleMissionControl;", __riviftErr); }
+            try { window.refreshMissionControlWindows = refreshMissionControlWindows;
+} catch (__riviftErr) { __riviftInitFail("L38945 Expression: window.refreshMissionControlWindows = refreshMissionControlW", __riviftErr); }
 
             function addDesktop() {
                 RiviftOS.desktopManager.addDesktop();
@@ -39415,7 +39730,7 @@ ${assistantAnswer.slice(0, 1000)}
 
             const _SNAP_DIVIDER_RESTORE_TRANSITION = 'opacity 0.3s ease-out, transform 0.3s ease-out, width 0.2s ease, height 0.2s ease, border-radius 0.3s ease';
 
-            (function initSnapDividerDrag() {
+            try { (function initSnapDividerDrag() {
                 const divider = document.getElementById('snap-divider');
                 if (divider) {
                     divider.addEventListener('mousedown', (e) => {
@@ -39520,8 +39835,10 @@ ${assistantAnswer.slice(0, 1000)}
                 initHDrag('snap-divider-h-left', () => snapDividerHLeftPair);
                 initHDrag('snap-divider-h-right', () => snapDividerHRightPair);
             })();
+} catch (__riviftErr) { __riviftInitFail("L39418 Expression: (function initSnapDividerDrag() { const divider = document.g", __riviftErr); }
 
-            window.addEventListener('resize', () => { updateSnapDivider(); hideSnapAssist(); });
+            try { window.addEventListener('resize', () => { updateSnapDivider(); hideSnapAssist(); });
+} catch (__riviftErr) { __riviftInitFail("L39524 Expression: window.addEventListener('resize', () => { updateSnapDivider(", __riviftErr); }
 
             function updateWindowResizer() {
                 const resizer = document.getElementById('window-resizer');
@@ -39543,7 +39860,7 @@ ${assistantAnswer.slice(0, 1000)}
                 }
             }
 
-            document.getElementById('window-resizer').addEventListener('mousedown', (e) => {
+            try { document.getElementById('window-resizer').addEventListener('mousedown', (e) => {
                 if (!activeResizer.active) return;
 
                 e.preventDefault();
@@ -39573,8 +39890,9 @@ ${assistantAnswer.slice(0, 1000)}
                 document.addEventListener('mousemove', onMouseMove);
                 document.addEventListener('mouseup', onMouseUp);
             });
+} catch (__riviftErr) { __riviftInitFail("L39546 Expression: document.getElementById('window-resizer').addEventListener('", __riviftErr); }
 
-            document.getElementById('window-resizer').addEventListener('touchstart', (e) => {
+            try { document.getElementById('window-resizer').addEventListener('touchstart', (e) => {
                 if (!activeResizer.active) return;
 
                 e.preventDefault();
@@ -39607,6 +39925,7 @@ ${assistantAnswer.slice(0, 1000)}
                 document.addEventListener('touchmove', onTouchMove, { passive: false });
                 document.addEventListener('touchend', onTouchEnd);
             }, { passive: false });
+} catch (__riviftErr) { __riviftInitFail("L39577 Expression: document.getElementById('window-resizer').addEventListener('", __riviftErr); }
 
             let terminalCWD = '/'; // 現在のディレクトリ (初期値はルート)
             let commandHistory = [];
@@ -40325,7 +40644,8 @@ ${assistantAnswer.slice(0, 1000)}
                 }
                 throw new Error(`都市「${city}」が見つかりません`);
             };
-            window.__riviftResolveCityCoords = resolveCityCoordinates;
+            try { window.__riviftResolveCityCoords = resolveCityCoordinates;
+} catch (__riviftErr) { __riviftInitFail("L40328 Expression: window.__riviftResolveCityCoords = resolveCityCoordinates;", __riviftErr); }
 
             const fetchWeatherForCity = async (rawCity) => {
                 const city = (rawCity || 'Tokyo').trim() || 'Tokyo';
@@ -40385,13 +40705,18 @@ ${assistantAnswer.slice(0, 1000)}
                 RiviftLogger.log("Calendar data updated.");
                 updateAllWidgets();
             };
-            window.__riviftRefreshCalendarWidget = fetchCalendarData;
+            try { window.__riviftRefreshCalendarWidget = fetchCalendarData;
+} catch (__riviftErr) { __riviftInitFail("L40388 Expression: window.__riviftRefreshCalendarWidget = fetchCalendarData;", __riviftErr); }
 try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
 
-            setInterval(fetchWeatherData, 15 * 60 * 1000);
-            setInterval(fetchCalendarData, 15 * 60 * 1000);
-            fetchWeatherData();
-            fetchCalendarData();
+            try { setInterval(fetchWeatherData, 15 * 60 * 1000);
+} catch (__riviftErr) { __riviftInitFail("L40391 Expression: setInterval(fetchWeatherData, 15 * 60 * 1000);", __riviftErr); }
+            try { setInterval(fetchCalendarData, 15 * 60 * 1000);
+} catch (__riviftErr) { __riviftInitFail("L40392 Expression: setInterval(fetchCalendarData, 15 * 60 * 1000);", __riviftErr); }
+            try { fetchWeatherData();
+} catch (__riviftErr) { __riviftInitFail("L40393 Expression: fetchWeatherData();", __riviftErr); }
+            try { fetchCalendarData();
+} catch (__riviftErr) { __riviftInitFail("L40394 Expression: fetchCalendarData();", __riviftErr); }
 
             const getWeatherIcon = (code, isDay = 1) => {
                 const isDayTime = isDay === 1;
@@ -40504,7 +40829,7 @@ try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
                 }
             };
 
-            const RiviftIconLoader = (() => {
+            let RiviftIconLoader; try { RiviftIconLoader = (() => {
                 const good = new Map(), pending = new Map();
                 const canFetch = location.protocol !== 'file:';
                 const ICON_RE = /(^|\/)icons\/[^?#]+\.(svg|png|webp|jpe?g|gif|ico)(\?|#|$)/i;
@@ -40595,7 +40920,9 @@ try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
                 document.addEventListener('error', e => { const t = e.target; if (t && t.tagName === 'IMG' && isIcon(t)) recover(t); }, true);
                 return { best: s => (typeof s === 'string' && good.get(s)) || s, load, recover, tile };
             })();
-            window.RiviftIconLoader = RiviftIconLoader;
+} catch (__riviftErr) { __riviftInitFail("L40507 const: const RiviftIconLoader = (() => { const good = new Map(), pe", __riviftErr); }
+            try { window.RiviftIconLoader = RiviftIconLoader;
+} catch (__riviftErr) { __riviftInitFail("L40598 Expression: window.RiviftIconLoader = RiviftIconLoader;", __riviftErr); }
 
             function getRiviftIconHtml(iconValue, additionalClasses = '', iconImageFallback = null) {
                 if (iconImageFallback && (/^data:image\//i.test(iconImageFallback) || /\.(png|svg|webp|jpg|jpeg|gif)$/i.test(iconImageFallback))) {
@@ -40629,7 +40956,8 @@ try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
 
                 return `<i class="${iconValue} rivift-auto-icon ${additionalClasses}"></i>`;
             }
-            window.getRiviftIconHtml = getRiviftIconHtml;
+            try { window.getRiviftIconHtml = getRiviftIconHtml;
+} catch (__riviftErr) { __riviftInitFail("L40632 Expression: window.getRiviftIconHtml = getRiviftIconHtml;", __riviftErr); }
 
             function escHtml(str) {
                 return String(str)
@@ -40639,7 +40967,8 @@ try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
                     .replace(/"/g, '&quot;')
                     .replace(/'/g, '&#039;');
             }
-            window.escHtml = escHtml;
+            try { window.escHtml = escHtml;
+} catch (__riviftErr) { __riviftInitFail("L40642 Expression: window.escHtml = escHtml;", __riviftErr); }
 
             const APP_ICONS = {
                 settings: 'fas fa-cog',
@@ -40679,7 +41008,8 @@ try { sessionStorage.removeItem('__rivift_boot_attempts__'); } catch (_) {}
                 autoscript: 'icons/自動実行.svg',
                 'app-creator': 'icons/AppCreator.svg',
             };
-            window.APP_ICONS = APP_ICONS; // 必要に応じて外部からも参照可能に
+            try { window.APP_ICONS = APP_ICONS;
+} catch (__riviftErr) { __riviftInitFail("L40682 Expression: window.APP_ICONS = APP_ICONS;", __riviftErr); } // 必要に応じて外部からも参照可能に
 
             const RIVIFT_C_RUNNER_WORKER_SRC = `"use strict";
 var NL = String.fromCharCode(10);
@@ -41708,7 +42038,7 @@ self.addEventListener("message", function(ev) {
     }
 });`;
 
-            window._riviftRunnerPool = {
+            try { window._riviftRunnerPool = {
                 worker: null,
                 blobUrl: null,
                 busy: false,
@@ -41761,11 +42091,13 @@ self.addEventListener("message", function(ev) {
                     setTimeout(() => this.ensureWorker(), 10);
                 }
             };
-            setTimeout(() => {
+} catch (__riviftErr) { __riviftInitFail("L41711 Expression: window._riviftRunnerPool = { worker: null, blobUrl: null, bu", __riviftErr); }
+            try { setTimeout(() => {
                 if (window._riviftRunnerPool) window._riviftRunnerPool.ensureWorker();
             }, 100);
+} catch (__riviftErr) { __riviftInitFail("L41764 Expression: setTimeout(() => { if (window._riviftRunnerPool) window._riv", __riviftErr); }
 
-            window._riviftGetMainThreadCEngine = async function() {
+            try { window._riviftGetMainThreadCEngine = async function() {
                 return {
                     run: function(code, stdin, config) {
                         if (config && config.stdio && config.stdio.write) {
@@ -41775,8 +42107,9 @@ self.addEventListener("message", function(ev) {
                     }
                 };
             };
+} catch (__riviftErr) { __riviftInitFail("L41768 Expression: window._riviftGetMainThreadCEngine = async function() { retu", __riviftErr); }
 
-            window._riviftReadVfsText = async function(path) {
+            try { window._riviftReadVfsText = async function(path) {
                 try {
                     const fd = await readFileWithWorker(path);
                     if (!fd || !fd.content) return '';
@@ -41787,8 +42120,9 @@ self.addEventListener("message", function(ev) {
                     return String(fd.content);
                 } catch (_) { return ''; }
             };
+} catch (__riviftErr) { __riviftInitFail("L41779 Expression: window._riviftReadVfsText = async function(path) { try { con", __riviftErr); }
 
-            window._riviftCollectDirFiles = async function(dirs, openTabsList = []) {
+            try { window._riviftCollectDirFiles = async function(dirs, openTabsList = []) {
                 const fileTextMap = {};
                 const assetUrlMap = {};
                 const uniqueDirs = Array.from(new Set((dirs || []).filter(Boolean)));
@@ -41852,8 +42186,9 @@ self.addEventListener("message", function(ev) {
                 }
                 return { files: fileTextMap, assets: assetUrlMap };
             };
+} catch (__riviftErr) { __riviftInitFail("L41791 Expression: window._riviftCollectDirFiles = async function(dirs, openTab", __riviftErr); }
 
-            window._riviftResolveCodeIncludes = async function(rawCode, lang, dirs = [], openTabsList = []) {
+            try { window._riviftResolveCodeIncludes = async function(rawCode, lang, dirs = [], openTabsList = []) {
                 if (!rawCode) return { code: '', files: {}, assets: {} };
                 const { files, assets } = await window._riviftCollectDirFiles(dirs, openTabsList);
                 let resolved = rawCode;
@@ -41996,7 +42331,8 @@ self.addEventListener("message", function(ev) {
                     }
                 }
                 return { code: resolved, files, assets };
-            };            window._riviftTranspileCToLoopJS = function(rawCode) {
+            };
+} catch (__riviftErr) { __riviftInitFail("L41856 Expression: window._riviftResolveCodeIncludes = async function(rawCode, ", __riviftErr); }            try { window._riviftTranspileCToLoopJS = function(rawCode) {
                 let src = rawCode.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/.*$/gm, m => (m[0] === '"' || m[0] === "'") ? m : '');
                 src = src.replace(/'(\\.|[^'\\])'/g, (_, ch) => {
                     if (ch === '\\n') return '10';
@@ -42113,8 +42449,9 @@ self.addEventListener("message", function(ev) {
 
                 return src;
             };
+} catch (__riviftErr) { __riviftInitFail("L41999 Expression: window._riviftTranspileCToLoopJS = function(rawCode) { let s", __riviftErr); }
 
-            window._riviftRunDynamicRaylib = async function(rawCode, canvas, options = {}) {
+            try { window._riviftRunDynamicRaylib = async function(rawCode, canvas, options = {}) {
                 if (!canvas) return () => {};
                 const ctx = canvas.getContext('2d');
                 const dirs = options.dirs || ['/Documents'];
@@ -42407,8 +42744,9 @@ self.addEventListener("message", function(ev) {
 
                 return cleanup;
             };
+} catch (__riviftErr) { __riviftInitFail("L42117 Expression: window._riviftRunDynamicRaylib = async function(rawCode, can", __riviftErr); }
 
-            window._riviftRunDynamicGba = async function(rawCode, canvas, options = {}) {
+            try { window._riviftRunDynamicGba = async function(rawCode, canvas, options = {}) {
                 if (!canvas) return () => {};
                 const ctx = canvas.getContext('2d');
                 const dirs = options.dirs || ['/Documents'];
@@ -42520,8 +42858,9 @@ self.addEventListener("message", function(ev) {
 
                 return cleanup;
             };
+} catch (__riviftErr) { __riviftInitFail("L42411 Expression: window._riviftRunDynamicGba = async function(rawCode, canvas", __riviftErr); }
 
-            window.RIVIFT_STARTER_TEMPLATES = {
+            try { window.RIVIFT_STARTER_TEMPLATES = {
                 game: {
                     id: 'starter-game',
                     title: 'Star Catcher DX',
@@ -43003,8 +43342,9 @@ self.addEventListener("message", function(ev) {
 </html>`
                 }
             };
+} catch (__riviftErr) { __riviftInitFail("L42524 Expression: window.RIVIFT_STARTER_TEMPLATES = { game: { id: 'starter-gam", __riviftErr); }
 
-            window.CREATOR_BADGES = [
+            try { window.CREATOR_BADGES = [
                 {
                     id: 'first_publish',
                     name: '初投稿クリエイター',
@@ -43051,8 +43391,9 @@ self.addEventListener("message", function(ev) {
                     check: (myApps) => myApps.length >= 1
                 }
             ];
+} catch (__riviftErr) { __riviftInitFail("L43007 Expression: window.CREATOR_BADGES = [ { id: 'first_publish', name: '初投稿ク", __riviftErr); }
 
-            const apps = [
+            let apps; try { apps = [
                 {
                     id: 'settings', name: t('app.settings'), icon: APP_ICONS['settings'], installed: true,
                     launcher: (params = {}) => {
@@ -43521,7 +43862,7 @@ self.addEventListener("message", function(ev) {
                                     }
                                     else if (key === 'dock') {
                                         const DOCK_KEY = 'riviftMobileDockApps';
-                                        let dockIds = JSON.parse(localStorage.getItem(DOCK_KEY) || 'null') || ['files', 'browser', 'music-player', 'settings'];
+                                        let dockIds = __lsParse(localStorage.getItem(DOCK_KEY), null) || ['files', 'browser', 'music-player', 'settings'];
                                         const allApps = (typeof getApps === 'function' ? getApps() : (window.RiviftMobile?._apps || [])).filter(a => a.installed);
                                         const renderDock = () => {
                                             detailBody.innerHTML = `
@@ -43892,7 +44233,7 @@ self.addEventListener("message", function(ev) {
                             if (category === 'account') {
                                 const _riviftToken = localStorage.getItem('rivift_auth_token');
                                 let _cachedRiviftUser = null;
-                                try { _cachedRiviftUser = JSON.parse(localStorage.getItem('rivift_user_cache') || 'null'); } catch (e) {}
+                                try { _cachedRiviftUser = __lsParse(localStorage.getItem('rivift_user_cache'), null); } catch (e) {}
                                 const _riviftUser = window.RiviftConnect?.currentUser || _cachedRiviftUser;
 
                                 if (_riviftToken && _riviftUser) {
@@ -44186,8 +44527,8 @@ self.addEventListener("message", function(ev) {
                                     font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;
                                 `;
 
-                                let userAddedIcons = JSON.parse(localStorage.getItem('riviftUserAddedIcons_v2')) || [];
-                                let userAddedColors = JSON.parse(localStorage.getItem('riviftUserAddedColors_v2')) || [];
+                                let userAddedIcons = __lsParse(localStorage.getItem('riviftUserAddedIcons_v2')) || [];
+                                let userAddedColors = __lsParse(localStorage.getItem('riviftUserAddedColors_v2')) || [];
 
                                 const _accountSubtitle = _riviftToken
                                     ? ((_riviftUser && _riviftUser.email) || 'Riviftアカウント')
@@ -46083,7 +46424,7 @@ self.addEventListener("message", function(ev) {
                                 const CHAT_MODEL_ID = RIVIFT_CHAT_MODEL_ID;
                                 const CODE_MODEL_ID = 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC';
                                 let aiPermissions = {};
-                                try { aiPermissions = JSON.parse(localStorage.getItem('ai_permissions') || '{}'); } catch { }
+                                try { aiPermissions = __lsParse(localStorage.getItem('ai_permissions'), {}); } catch { }
                                 const usageHistoryEnabled = localStorage.getItem('riviftAIUsageHistory') === 'true';
                                 const internetAccessEnabled = localStorage.getItem('riviftAIInternetAccess') !== 'false';
                                 const webAccessEnabled = localStorage.getItem('riviftAIWebAccess') !== 'false';
@@ -46309,7 +46650,7 @@ self.addEventListener("message", function(ev) {
                                     sel.addEventListener('change', (e) => {
                                         const key = e.target.dataset.permKey;
                                         let perms = {};
-                                        try { perms = JSON.parse(localStorage.getItem('ai_permissions') || '{}'); } catch { }
+                                        try { perms = __lsParse(localStorage.getItem('ai_permissions'), {}); } catch { }
                                         perms[key] = e.target.value;
                                         localStorage.setItem('ai_permissions', JSON.stringify(perms));
                                         const style = PERM_LEVEL_STYLE[e.target.value];
@@ -47498,7 +47839,7 @@ body.mobile-mode .np-ma-btn:active {
 
                         const STORAGE_KEY = 'riviftNotes_v1';
                         const VFS_DIR = `/Documents/${t('notepad.folderName')}`;     // VFS自動保存先
-                        let notes = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                        let notes = __lsParse(localStorage.getItem(STORAGE_KEY), []);
                         let curId = null;
                         let curFolder = 'all';
                         let showPreview = false;
@@ -48324,8 +48665,8 @@ body.mobile-mode .br-m-btn:active {
 
                         let tabs = [];
                         let activeTabId = null;
-                        let history_ = JSON.parse(localStorage.getItem('riviftBrowserHistory2') || '[]');
-                        let bookmarks = JSON.parse(localStorage.getItem('riviftBrowserBookmarks') || '[]');
+                        let history_ = __lsParse(localStorage.getItem('riviftBrowserHistory2'), []);
+                        let bookmarks = __lsParse(localStorage.getItem('riviftBrowserBookmarks'), []);
 
                         const uid = () => Math.random().toString(36).slice(2, 8);
                         const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -48820,7 +49161,7 @@ body.mobile-mode .br-m-btn:active {
                         <button id="br-add-site-${tab.id}" style="font-size:11px;color:var(--ac);background:transparent;border:none;cursor:pointer;display:flex;align-items:center;gap:4px;"><i class="fas fa-plus"></i> 追加</button>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:100%;max-width:600px;">
-                        ${[...HOME_SITES, ...(JSON.parse(localStorage.getItem('riviftBrowserHomeSites') || '[]'))].map((s, idx) => `
+                        ${[...HOME_SITES, ...(__lsParse(localStorage.getItem('riviftBrowserHomeSites'), []))].map((s, idx) => `
                             <div class="br-site-card" data-url="${s.url}" data-idx="${s.custom ? idx : ''}" style="position:relative;background:var(--tb);border:1px solid var(--br);border-radius:12px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;transition:background .12s;">
                                 ${s.custom ? `<button class="br-del-custom-site" data-cidx="${idx - HOME_SITES.length}" title="削除" style="position:absolute;top:4px;right:6px;background:transparent;border:none;color:var(--tx2);font-size:10px;cursor:pointer;">×</button>` : ''}
                                 <i class="${s.icon || 'fas fa-globe'}" style="font-size:22px;color:${s.color || '#0a84ff'}"></i>
@@ -48849,7 +49190,7 @@ body.mobile-mode .br-m-btn:active {
                                     btn.addEventListener('click', (e) => {
                                         e.stopPropagation();
                                         const cidx = parseInt(btn.dataset.cidx, 10);
-                                        let customList = JSON.parse(localStorage.getItem('riviftBrowserHomeSites') || '[]');
+                                        let customList = __lsParse(localStorage.getItem('riviftBrowserHomeSites'), []);
                                         customList.splice(cidx, 1);
                                         localStorage.setItem('riviftBrowserHomeSites', JSON.stringify(customList));
                                         showHome(tab);
@@ -48863,7 +49204,7 @@ body.mobile-mode .br-m-btn:active {
                                         if (!title || typeof title !== 'string') return;
                                         const siteUrl = await showMessageBox('お気に入りサイト追加', 'URLを入力してください:', false, 'https://', false);
                                         if (!siteUrl || typeof siteUrl !== 'string') return;
-                                        let customList = JSON.parse(localStorage.getItem('riviftBrowserHomeSites') || '[]');
+                                        let customList = __lsParse(localStorage.getItem('riviftBrowserHomeSites'), []);
                                         customList.push({ name: title, url: siteUrl.trim(), icon: 'fas fa-globe', color: '#0a84ff', custom: true });
                                         localStorage.setItem('riviftBrowserHomeSites', JSON.stringify(customList));
                                         showHome(tab);
@@ -50297,7 +50638,7 @@ iframe{width:100%;height:100%;border:none;}</style></head>
                             window.globalMusicState.audioElement = audio;
 
                             try {
-                                let recents = JSON.parse(localStorage.getItem('riviftRecentMusic') || '[]');
+                                let recents = __lsParse(localStorage.getItem('riviftRecentMusic'), []);
                                 recents = recents.filter(r => r && r.name !== trackMeta.name);
                                 recents.unshift({
                                     name: trackMeta.name,
@@ -50998,7 +51339,7 @@ iframe{width:100%;height:100%;border:none;}</style></head>
                             return;
                         }
 
-                        let pinnedFolders = JSON.parse(localStorage.getItem('riviftPinnedFolders')) || [
+                        let pinnedFolders = __lsParse(localStorage.getItem('riviftPinnedFolders')) || [
                             { name: 'OS', path: '/', icon: 'fas fa-desktop' },
                             { name: 'Documents', path: '/Documents', icon: 'fas fa-file-alt' },
                             { name: 'Pictures', path: '/Pictures', icon: 'fas fa-image' },
@@ -53446,7 +53787,7 @@ body.mobile-mode .term-prompt-sym {
                                 const ms = window.OS_KERNEL ? (Date.now() - (window.OS_KERNEL.processTable.get(0)?.startTime ?? Date.now())) : 0;
                                 const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60);
                                 const lines = [
-                                    `<span class="t-key">OS         </span> <span class="t-val">Rivift OS 2</span>`,
+                                    `<span class="t-key">OS         </span> <span class="t-val">Rivift OS</span>`,
                                     `<span class="t-key">${t('cmd.sysinfo.user')}</span> <span class="t-val">${termEnv.USER}</span>`,
                                     `<span class="t-key">${t('cmd.sysinfo.theme')}</span> <span class="t-val">${isDarkMode ? t('cmd.sysinfo.themeDark') : t('cmd.sysinfo.themeLight')}</span>`,
                                     `<span class="t-key">${t('cmd.sysinfo.brightness')}</span> <span class="t-val">${systemBrightness}%</span>`,
@@ -53484,7 +53825,7 @@ body.mobile-mode .term-prompt-sym {
                             },
                             night: async (args) => {
                                 if (!args[0]) {
-                                    const enabled = JSON.parse(localStorage.getItem('riviftNightModeEnabled')) || false;
+                                    const enabled = __lsParse(localStorage.getItem('riviftNightModeEnabled')) || false;
                                     return t('cmd.nightMode').replace('{state}', enabled ? 'ON' : 'OFF');
                                 }
                                 const on = args[0] === 'on';
@@ -59926,7 +60267,7 @@ body.light-mode #rhe-root {
                             folding: true,
                             autoLivePreview: true
                         }, (() => {
-                            try { return JSON.parse(localStorage.getItem('riviftCodeEditorConfig') || '{}'); } catch (_) { return {}; }
+                            try { return __lsParse(localStorage.getItem('riviftCodeEditorConfig'), {}); } catch (_) { return {}; }
                         })());
 
                         const rheSt = (id) => id === 'rhe-root' ? (editorWindow.querySelector('#rhe-root') || editorWindow) : editorWindow.querySelector('#' + id);
@@ -64215,7 +64556,7 @@ body.light-mode #ac-root {
                         const STORE_KEY = 'riviftInstalledApps';
 
                         function getInstalledApps() {
-                            try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+                            try { return __lsParse(localStorage.getItem(STORE_KEY)) || []; }
                             catch { return []; }
                         }
                         function saveInstalledApps(list) {
@@ -69883,7 +70224,7 @@ show(0);
                             let isRestoringState = false;
                             let isExecuting = false;
                             let contextTarget = null;
-                            let myBlocks = JSON.parse(localStorage.getItem('myBlocks') || '{}');
+                            let myBlocks = __lsParse(localStorage.getItem('myBlocks'), {});
 
                             const webStudioBlockDefinitions = {
                                 html: {
@@ -76166,7 +76507,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                         if (!window._AS_ENGINE) {
                             window._AS_ENGINE = {
-                                rules: JSON.parse(localStorage.getItem('autoscript_rules') || '[]'),
+                                rules: __lsParse(localStorage.getItem('autoscript_rules'), []),
                                 listeners: [],
                                 save() { localStorage.setItem('autoscript_rules', JSON.stringify(this.rules)); },
                                 runAction(action, api) {
@@ -76727,17 +77068,21 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 },
 
             ];
+} catch (__riviftErr) { __riviftInitFail("L43055 const: const apps = [ { id: 'settings', name: t('app.settings'), ic", __riviftErr); }
 
-            apps.forEach(app => {
+            try { apps.forEach(app => {
                 if (RiviftIcons.apps[app.id]) {
                     app.icon = RiviftIcons.apps[app.id];
                 }
             });
-            window.apps = apps;
+} catch (__riviftErr) { __riviftInitFail("L76731 Expression: apps.forEach(app => { if (RiviftIcons.apps[app.id]) { app.ic", __riviftErr); }
+            try { window.apps = apps;
+} catch (__riviftErr) { __riviftInitFail("L76736 Expression: window.apps = apps;", __riviftErr); }
 
-            const customWebApps = JSON.parse(localStorage.getItem('riviftCustomWebApps')) || [];
+            let customWebApps; try { customWebApps = __lsParse(localStorage.getItem('riviftCustomWebApps')) || [];
+} catch (__riviftErr) { __riviftInitFail("L76738 const: const customWebApps = __lsParse(localStorage.getItem('rivift", __riviftErr); }
 
-            customWebApps.forEach(customApp => {
+            try { customWebApps.forEach(customApp => {
                 if (apps.some(app => app.id === customApp.id)) return;
 
                 customApp.launcher = () => {
@@ -76755,6 +77100,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                 apps.push(customApp);
             });
+} catch (__riviftErr) { __riviftInitFail("L76740 Expression: customWebApps.forEach(customApp => { if (apps.some(app => ap", __riviftErr); }
 
             function saveCustomWebApps() {
                 const webAppsToSave = apps.filter(app => app.isWebApp);
@@ -76924,7 +77270,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     cityListEl: appWindow.querySelector('.wc-city-list'),
                     addCityBtn: appWindow.querySelector('#wc-add-city-btn'),
                     isDigital: true,
-                    cities: JSON.parse(localStorage.getItem('riviftWorldClockCities_v1') || '[]'),
+                    cities: __lsParse(localStorage.getItem('riviftWorldClockCities_v1'), []),
                     save: () => localStorage.setItem('riviftWorldClockCities_v1', JSON.stringify(worldClock.cities)),
                     update: () => {
                         worldClock.digital.classList.toggle('hidden', !worldClock.isDigital);
@@ -77036,7 +77382,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     addBtn: appWindow.querySelector('#add-alarm-btn'),
                     list: appWindow.querySelector('.alarm-list'),
                     alarms: (() => {
-                        const raw = JSON.parse(localStorage.getItem('riviftAlarms_v2')) || [{ time: '07:00', label: t('clock.alarm.default'), enabled: true }];
+                        const raw = __lsParse(localStorage.getItem('riviftAlarms_v2')) || [{ time: '07:00', label: t('clock.alarm.default'), enabled: true }];
                         return raw.map(a => ({ repeatDays: [], ...a }));
                     })(),
                     render: () => {
@@ -77200,7 +77546,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     nextId: 1,
                     QUICK_STORAGE_KEY: 'riviftClockQuickTimers_v1',
                     MAX_QUICK_TIMERS: 8,
-                    quickDurationsSec: JSON.parse(localStorage.getItem('riviftClockQuickTimers_v1') || '[180]'),
+                    quickDurationsSec: __lsParse(localStorage.getItem('riviftClockQuickTimers_v1'), [180]),
                     saveQuickDurations: () => localStorage.setItem('riviftClockQuickTimers_v1', JSON.stringify(timerManager.quickDurationsSec)),
                     addQuickDuration: (sec) => {
                         if (sec <= 0) return;
@@ -81865,12 +82211,13 @@ RiviftConnect.connectToServer = function () {
             }
 
             // Connect バックグラウンドサービスのOS自動起動
-            setTimeout(() => {
+            try { setTimeout(() => {
                 const token = localStorage.getItem('rivift_auth_token');
                 if (token && (!window.RiviftConnect || !window.RiviftConnect.currentUser)) {
                     initializeConnectApp(null);
                 }
             }, 600);
+} catch (__riviftErr) { __riviftInitFail("L81868 Expression: setTimeout(() => { const token = localStorage.getItem('rivif", __riviftErr); }
 
             async function initializeMailApp(appWindow) {
                 const RM = {};
@@ -82368,7 +82715,7 @@ RiviftConnect.connectToServer = function () {
                 }
             }
 
-            desktop.addEventListener('contextmenu', (e) => {
+            try { desktop.addEventListener('contextmenu', (e) => {
                 if (e.target.closest('.desktop-icon') || e.target.closest('.app-window')) return;
                 e.preventDefault();
                 const alignmentLabel = 'アイコンを整列';
@@ -82420,9 +82767,11 @@ RiviftConnect.connectToServer = function () {
                 ];
                 showContextMenu(menuItems, e);
             });
+} catch (__riviftErr) { __riviftInitFail("L82371 Expression: desktop.addEventListener('contextmenu', (e) => { if (e.targe", __riviftErr); }
 
-            desktop.addEventListener('dragover', (e) => e.preventDefault());
-            desktop.addEventListener('drop', async (e) => {
+            try { desktop.addEventListener('dragover', (e) => e.preventDefault());
+} catch (__riviftErr) { __riviftInitFail("L82424 Expression: desktop.addEventListener('dragover', (e) => e.preventDefault", __riviftErr); }
+            try { desktop.addEventListener('drop', async (e) => {
                 e.preventDefault();
                 if (e.target.id !== 'desktop' && !e.target.closest('#desktop-icons')) {
                     return;
@@ -82491,8 +82840,9 @@ RiviftConnect.connectToServer = function () {
                     createNotification('エラー', 'ショートカットの作成に失敗しました。', 'error');
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L82425 Expression: desktop.addEventListener('drop', async (e) => { e.preventDef", __riviftErr); }
 
-            const RiviftQuickLook = (() => {
+            let RiviftQuickLook; try { RiviftQuickLook = (() => {
                 if (!document.getElementById('rivift-quicklook-loading-style')) {
                     const styleEl = document.createElement('style');
                     styleEl.id = 'rivift-quicklook-loading-style';
@@ -83037,8 +83387,9 @@ RiviftConnect.connectToServer = function () {
 
                 return { open, close, toggle, get isOpen() { return qlOpen; }, WINDOW_ID: QL_WINDOW_ID };
             })();
+} catch (__riviftErr) { __riviftInitFail("L82495 const: const RiviftQuickLook = (() => { if (!document.getElementByI", __riviftErr); }
 
-            document.addEventListener('keydown', (e) => {
+            try { document.addEventListener('keydown', (e) => {
                 const activeTag = (document.activeElement && document.activeElement.tagName) || '';
                 const isTyping = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable;
                 if (isTyping) return;
@@ -83086,16 +83437,19 @@ RiviftConnect.connectToServer = function () {
                     });
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L83041 Expression: document.addEventListener('keydown', (e) => { const activeTa", __riviftErr); }
 
             // ===== 複数起動（マルチインスタンス）基盤 =====
             function getAppWindowIds(appId) {
                 const base = 'app-window-' + appId;
                 return Array.from(openApps.keys()).filter(k => k === base || k.startsWith(base + '-'));
             }
-            window.getAppWindowIds = getAppWindowIds;
-            window.__newInstanceApp = null;
+            try { window.getAppWindowIds = getAppWindowIds;
+} catch (__riviftErr) { __riviftInitFail("L83095 Expression: window.getAppWindowIds = getAppWindowIds;", __riviftErr); }
+            try { window.__newInstanceApp = null;
+} catch (__riviftErr) { __riviftInitFail("L83096 Expression: window.__newInstanceApp = null;", __riviftErr); }
             // 新規インスタンス起動中のみ、既存と衝突しない window id を返す
-            window.__instId = function (appId) {
+            try { window.__instId = function (appId) {
                 const base = 'app-window-' + appId;
                 if (window.__newInstanceApp === appId && (openApps.has(base) || document.getElementById(base))) {
                     let n = 2;
@@ -83104,10 +83458,12 @@ RiviftConnect.connectToServer = function () {
                 }
                 return base;
             };
+} catch (__riviftErr) { __riviftInitFail("L83098 Expression: window.__instId = function (appId) { const base = 'app-windo", __riviftErr); }
             // 起動済みなら新しいウィンドウ、未起動なら通常起動（スタートメニュー等から使用）
-            window.__newIfRunning = function (appId) {
+            try { window.__newIfRunning = function (appId) {
                 return getAppWindowIds(appId).length > 0 ? { __newInstance: true } : {};
             };
+} catch (__riviftErr) { __riviftInitFail("L83108 Expression: window.__newIfRunning = function (appId) { return getAppWind", __riviftErr); }
             function __runLauncher(app, params, forceNew) {
                 if (!forceNew) return app.launcher(params);
                 window.__newInstanceApp = app.id;
@@ -83362,10 +83718,11 @@ RiviftConnect.connectToServer = function () {
                     createNotification('エラー', 'アプリケーションが見つかりません。', 'error');
                 }
             }
-            window._launchApp = launchApp;
+            try { window._launchApp = launchApp;
+} catch (__riviftErr) { __riviftInitFail("L83365 Expression: window._launchApp = launchApp;", __riviftErr); }
 
             // ===== タスクバー ウィンドウプレビュー（Windows風）=====
-            const RiviftTaskbarPreview = (() => {
+            let RiviftTaskbarPreview; try { RiviftTaskbarPreview = (() => {
                 const HOVER_DELAY = 1000, SWITCH_DELAY = 120, HIDE_DELAY = 220, THUMB_W = 208, THUMB_H = 130;
                 let box = null, curApp = null, curIcon = null, showT = null, hideT = null, refreshT = null;
 
@@ -83667,11 +84024,14 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                     hide
                 };
             })();
-            window.RiviftTaskbarPreview = RiviftTaskbarPreview;
-            window.AppWorkerRuntime = AppWorkerRuntime;
+} catch (__riviftErr) { __riviftInitFail("L83368 const: const RiviftTaskbarPreview = (() => { const HOVER_DELAY = 10", __riviftErr); }
+            try { window.RiviftTaskbarPreview = RiviftTaskbarPreview;
+} catch (__riviftErr) { __riviftInitFail("L83670 Expression: window.RiviftTaskbarPreview = RiviftTaskbarPreview;", __riviftErr); }
+            try { window.AppWorkerRuntime = AppWorkerRuntime;
+} catch (__riviftErr) { __riviftInitFail("L83671 Expression: window.AppWorkerRuntime = AppWorkerRuntime;", __riviftErr); }
 
             // 共有リンク（?collab=CODE）で開かれたら、OSの起動完了後に Docs を開いて自動参加する
-            (function () {
+            try { (function () {
                 try {
                     const code = new URLSearchParams(location.search).get('collab');
                     if (code) {
@@ -83695,6 +84055,7 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                 }, 500);
                 setTimeout(() => clearInterval(iv), 180000);
             })();
+} catch (__riviftErr) { __riviftInitFail("L83674 Expression: (function () { try { const code = new URLSearchParams(locati", __riviftErr); }
 
             function renderDesktopIcons() {
                 if (!desktopIconsEl) return;
@@ -84023,7 +84384,7 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                 if (_iconsClamped) saveDesktopIcons();
             }
 
-            (function initRubberBand() {
+            try { (function initRubberBand() {
                 const rubberBand = document.getElementById('desktop-rubber-band');
                 if (!rubberBand) return;
 
@@ -84108,6 +84469,7 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                     document.addEventListener('mouseup', onUp);
                 });
             })();
+} catch (__riviftErr) { __riviftInitFail("L84026 Expression: (function initRubberBand() { const rubberBand = document.get", __riviftErr); }
 
             function createPopup(id, title, contentHtml, width = 350, height = 150) {
                 const popupId = `popup-window-${id}`;
@@ -84398,7 +84760,7 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                 document.removeEventListener('contextmenu', handleClickOutsideContextMenu, true);
             }
 
-            document.addEventListener('contextmenu', event => {
+            try { document.addEventListener('contextmenu', event => {
                 if (!isScreenAssistAvailable()
                     || event.target.closest('#rivift-screen-assist-overlay')) return;
                 if (!isEventOnDesktopOrWindow(event)) return;
@@ -84431,8 +84793,9 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                     });
                 }, 50);
             }, true);
+} catch (__riviftErr) { __riviftInitFail("L84401 Expression: document.addEventListener('contextmenu', event => { if (!isS", __riviftErr); }
 
-            document.addEventListener('contextmenu', (e) => {
+            try { document.addEventListener('contextmenu', (e) => {
                 if (e.target.closest('.monaco-editor')) return;
                 if (localStorage.getItem('riviftAIDisabled') === 'true') return;
                 const selection = window.getSelection();
@@ -84456,6 +84819,7 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                     }
                 ], e);
             }, true);
+} catch (__riviftErr) { __riviftInitFail("L84435 Expression: document.addEventListener('contextmenu', (e) => { if (e.targ", __riviftErr); }
 
             function _removeAISelectionPanelOnly() {
                 const oldPanel = document.getElementById('ai-selection-panel');
@@ -85066,7 +85430,8 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     window.createNotification?.('画面アシスト', `画面情報を取得できませんでした: ${error.message}`, 'error');
                 }
             }
-            window.openUnifiedScreenAssist = openUnifiedScreenAssist;
+            try { window.openUnifiedScreenAssist = openUnifiedScreenAssist;
+} catch (__riviftErr) { __riviftInitFail("L85069 Expression: window.openUnifiedScreenAssist = openUnifiedScreenAssist;", __riviftErr); }
 
             function closeAllSubmenus() {
                 document.querySelectorAll('.submenu-instance').forEach(submenu => {
@@ -85075,9 +85440,11 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 });
             }
 
-            let desktopIconsEl = document.getElementById('desktop-icons');
+            let desktopIconsEl; try { desktopIconsEl = document.getElementById('desktop-icons');
+} catch (__riviftErr) { __riviftInitFail("L85078 let: let desktopIconsEl = document.getElementById('desktop-icons'", __riviftErr); }
 
-            desktop.addEventListener('dragover', (e) => e.preventDefault());
+            try { desktop.addEventListener('dragover', (e) => e.preventDefault());
+} catch (__riviftErr) { __riviftInitFail("L85080 Expression: desktop.addEventListener('dragover', (e) => e.preventDefault", __riviftErr); }
 
             function handleClickOutsideContextMenu(event) {
                 const contextMenu = document.getElementById('context-menu');
@@ -85840,11 +86207,16 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     };
                 }
             }
-            window.riviftCheckForUpdate = riviftCheckForUpdate;
-            window.riviftScheduleUpdate = riviftScheduleUpdate;
-            window.riviftCancelScheduledUpdate = riviftCancelScheduledUpdate;
-            window.riviftGetScheduledUpdate = riviftGetScheduledUpdate;
-            window.riviftPerformUpdate = riviftPerformUpdate;
+            try { window.riviftCheckForUpdate = riviftCheckForUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85843 Expression: window.riviftCheckForUpdate = riviftCheckForUpdate;", __riviftErr); }
+            try { window.riviftScheduleUpdate = riviftScheduleUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85844 Expression: window.riviftScheduleUpdate = riviftScheduleUpdate;", __riviftErr); }
+            try { window.riviftCancelScheduledUpdate = riviftCancelScheduledUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85845 Expression: window.riviftCancelScheduledUpdate = riviftCancelScheduledUp", __riviftErr); }
+            try { window.riviftGetScheduledUpdate = riviftGetScheduledUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85846 Expression: window.riviftGetScheduledUpdate = riviftGetScheduledUpdate;", __riviftErr); }
+            try { window.riviftPerformUpdate = riviftPerformUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85847 Expression: window.riviftPerformUpdate = riviftPerformUpdate;", __riviftErr); }
             async function riviftClearUpdateCache() {
                 try {
                     localStorage.removeItem('riviftUpdatedVersion');
@@ -85875,14 +86247,20 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     window.location.reload();
                 }
             }
-            window.riviftClearUpdateCache = riviftClearUpdateCache;
-            window.riviftSimpleMarkdownToHtml = riviftSimpleMarkdownToHtml;
-            window.riviftPromptSelectFileForUpdate = riviftPromptSelectFileForUpdate;
-            window._riviftSupportsFileSystemAccess = _riviftSupportsFileSystemAccess;
-            window._riviftIsLocalFileMode = _riviftIsLocalFileMode;
+            try { window.riviftClearUpdateCache = riviftClearUpdateCache;
+} catch (__riviftErr) { __riviftInitFail("L85878 Expression: window.riviftClearUpdateCache = riviftClearUpdateCache;", __riviftErr); }
+            try { window.riviftSimpleMarkdownToHtml = riviftSimpleMarkdownToHtml;
+} catch (__riviftErr) { __riviftInitFail("L85879 Expression: window.riviftSimpleMarkdownToHtml = riviftSimpleMarkdownToHt", __riviftErr); }
+            try { window.riviftPromptSelectFileForUpdate = riviftPromptSelectFileForUpdate;
+} catch (__riviftErr) { __riviftInitFail("L85880 Expression: window.riviftPromptSelectFileForUpdate = riviftPromptSelectF", __riviftErr); }
+            try { window._riviftSupportsFileSystemAccess = _riviftSupportsFileSystemAccess;
+} catch (__riviftErr) { __riviftInitFail("L85881 Expression: window._riviftSupportsFileSystemAccess = _riviftSupportsFile", __riviftErr); }
+            try { window._riviftIsLocalFileMode = _riviftIsLocalFileMode;
+} catch (__riviftErr) { __riviftInitFail("L85882 Expression: window._riviftIsLocalFileMode = _riviftIsLocalFileMode;", __riviftErr); }
 
             let _riviftBackendAvailable = null;
-            window.isRiviftBackendAvailableSync = false;
+            try { window.isRiviftBackendAvailableSync = false;
+} catch (__riviftErr) { __riviftInitFail("L85885 Expression: window.isRiviftBackendAvailableSync = false;", __riviftErr); }
             async function isRiviftBackendAvailable() {
                 if (_riviftBackendAvailable !== null) return _riviftBackendAvailable;
                 try {
@@ -85895,10 +86273,12 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 }
                 return _riviftBackendAvailable;
             }
-            window.isRiviftBackendAvailable = isRiviftBackendAvailable;
-            isRiviftBackendAvailable().catch(() => {});
+            try { window.isRiviftBackendAvailable = isRiviftBackendAvailable;
+} catch (__riviftErr) { __riviftInitFail("L85898 Expression: window.isRiviftBackendAvailable = isRiviftBackendAvailable;", __riviftErr); }
+            try { isRiviftBackendAvailable().catch(() => {});
+} catch (__riviftErr) { __riviftInitFail("L85899 Expression: isRiviftBackendAvailable().catch(() => {});", __riviftErr); }
 
-            (() => {
+            try { (() => {
                 const scheduled = riviftGetScheduledUpdate();
                 if (scheduled && scheduled.executeAt) {
                     const delay = Math.max(0, scheduled.executeAt - Date.now());
@@ -85907,6 +86287,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }, delay);
                 }
             })();
+} catch (__riviftErr) { __riviftInitFail("L85901 Expression: (() => { const scheduled = riviftGetScheduledUpdate(); if (s", __riviftErr); }
 
             async function restartOS() {
                 if (await showMessageBox('再起動', 'OSを再起動しますか？', { showCancel: true })) {
@@ -85946,10 +86327,14 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }
                 }
             }
-            window.unlockOS = unlockOS;
-            window.lockOS = lockOS;
-            window.restartOS = restartOS;
-            window.shutdownOS = shutdownOS;
+            try { window.unlockOS = unlockOS;
+} catch (__riviftErr) { __riviftInitFail("L85949 Expression: window.unlockOS = unlockOS;", __riviftErr); }
+            try { window.lockOS = lockOS;
+} catch (__riviftErr) { __riviftInitFail("L85950 Expression: window.lockOS = lockOS;", __riviftErr); }
+            try { window.restartOS = restartOS;
+} catch (__riviftErr) { __riviftInitFail("L85951 Expression: window.restartOS = restartOS;", __riviftErr); }
+            try { window.shutdownOS = shutdownOS;
+} catch (__riviftErr) { __riviftInitFail("L85952 Expression: window.shutdownOS = shutdownOS;", __riviftErr); }
 
             function renderLockScreenPasswordInput() {
                 const passwordArea = document.getElementById('lock-screen-password-area');
@@ -86109,7 +86494,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 });
             }
 
-            lockScreen.addEventListener('click', (e) => {
+            try { lockScreen.addEventListener('click', (e) => {
                 if (e.target.closest('#lock-screen-password-area')) {
                     return;
                 }
@@ -86127,13 +86512,18 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L86112 Expression: lockScreen.addEventListener('click', (e) => { if (e.target.c", __riviftErr); }
 
-            updateTime();
-            applyTheme();
-            osContainer.style.backgroundImage = `url('${currentWallpaper}')`;
+            try { updateTime();
+} catch (__riviftErr) { __riviftInitFail("L86131 Expression: updateTime();", __riviftErr); }
+            try { applyTheme();
+} catch (__riviftErr) { __riviftInitFail("L86132 Expression: applyTheme();", __riviftErr); }
+            try { osContainer.style.backgroundImage = `url('${currentWallpaper}')`;
+} catch (__riviftErr) { __riviftInitFail("L86133 Expression: osContainer.style.backgroundImage = `url('${currentWallpaper", __riviftErr); }
 
-            currentTimeDisplay.addEventListener('click', () => togglePanel(quickSettingsPanel, startMenuPanel));
-            desktop.addEventListener('click', (e) => {
+            try { currentTimeDisplay.addEventListener('click', () => togglePanel(quickSettingsPanel, startMenuPanel));
+} catch (__riviftErr) { __riviftInitFail("L86135 Expression: currentTimeDisplay.addEventListener('click', () => togglePan", __riviftErr); }
+            try { desktop.addEventListener('click', (e) => {
                 if (!quickSettingsPanel.contains(e.target) && !currentTimeDisplay.contains(e.target) &&
                     !startMenuPanel.contains(e.target) && !menuButton.contains(e.target) &&
                     (quickSettingsPanel.classList.contains('active') || startMenuPanel.classList.contains('active'))) {
@@ -86144,16 +86534,20 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     document.querySelectorAll('.desktop-icon.selected').forEach(el => el.classList.remove('selected'));
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L86136 Expression: desktop.addEventListener('click', (e) => { if (!quickSetting", __riviftErr); }
 
             let hideTaskbarTimeout;
-            let globalMouseY = window.innerHeight;
-            let globalMouseX = window.innerWidth / 2;
+            let globalMouseY; try { globalMouseY = window.innerHeight;
+} catch (__riviftErr) { __riviftInitFail("L86149 let: let globalMouseY = window.innerHeight;", __riviftErr); }
+            let globalMouseX; try { globalMouseX = window.innerWidth / 2;
+} catch (__riviftErr) { __riviftInitFail("L86150 let: let globalMouseX = window.innerWidth / 2;", __riviftErr); }
 
-            document.addEventListener('pointermove', e => {
+            try { document.addEventListener('pointermove', e => {
                 globalMouseY = e.clientY;
                 globalMouseX = e.clientX;
                 checkTaskbarVisibility();
             }, { passive: true });
+} catch (__riviftErr) { __riviftInitFail("L86152 Expression: document.addEventListener('pointermove', e => { globalMouseY", __riviftErr); }
 
             let hideTaskbarTimeoutId = null;
             let isTaskbarCurrentlyVisible = true;
@@ -86210,7 +86604,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 }
             }
 
-            taskbar.addEventListener('mouseenter', () => {
+            try { taskbar.addEventListener('mouseenter', () => {
                 clearTimeout(hideTaskbarTimeoutId);
                 hideTaskbarTimeoutId = null;
                 if (!isTaskbarCurrentlyVisible) {
@@ -86219,8 +86613,9 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     if (typeof updatePanelPositions === 'function') updatePanelPositions();
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L86213 Expression: taskbar.addEventListener('mouseenter', () => { clearTimeout(", __riviftErr); }
 
-            taskbar.addEventListener('mouseleave', (e) => {
+            try { taskbar.addEventListener('mouseleave', (e) => {
                 const isAnyPanelOpen = (startMenuPanel && startMenuPanel.classList.contains('active')) ||
                                        (quickSettingsPanel && quickSettingsPanel.classList.contains('active')) ||
                                        (document.getElementById('notification-center-panel')?.classList.contains('active'));
@@ -86234,19 +86629,22 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }, 500);
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L86223 Expression: taskbar.addEventListener('mouseleave', (e) => { const isAnyP", __riviftErr); }
 
             /*        allAppsButton.addEventListener('click', () => {
                         closeAllPanels(); populateAllApps(); allAppsFullscreen.classList.add('active');
                         selectPinAppsButton.style.display = 'block'; taskbar.classList.remove('hidden'); taskbar.classList.add('full-width');
                         document.querySelectorAll('.app-window').forEach(win => { win.style.zIndex = 1999; });
                     });*/
-            allAppsSearchBar.addEventListener('input', populateAllApps);
-            exitAllAppsButton.addEventListener('click', () => {
+            try { allAppsSearchBar.addEventListener('input', populateAllApps);
+} catch (__riviftErr) { __riviftInitFail("L86243 Expression: allAppsSearchBar.addEventListener('input', populateAllApps);", __riviftErr); }
+            try { exitAllAppsButton.addEventListener('click', () => {
                 allAppsFullscreen.classList.remove('active'); pinMode = false; selectPinAppsButton.classList.remove('active');
                 document.querySelectorAll('.app-icon-fullscreen').forEach(icon => icon.classList.remove('pin-mode'));
                 updateTaskbarAppStatus();
             });
-            selectPinAppsButton.addEventListener('click', () => {
+} catch (__riviftErr) { __riviftInitFail("L86244 Expression: exitAllAppsButton.addEventListener('click', () => { allAppsF", __riviftErr); }
+            try { selectPinAppsButton.addEventListener('click', () => {
                 pinMode = !pinMode; // pinModeフラグを切り替える
                 selectPinAppsButton.classList.toggle('active', pinMode);
 
@@ -86254,6 +86652,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     icon.classList.toggle('pin-mode', pinMode);
                 });
             });
+} catch (__riviftErr) { __riviftInitFail("L86249 Expression: selectPinAppsButton.addEventListener('click', () => { pinMod", __riviftErr); }
 
             function addRecentItem(appId, appName, appIcon) {
                 recentItems = recentItems.filter(item => item.id !== appId);
@@ -86410,7 +86809,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 });
             }
 
-            window.addEventListener('load', async () => {
+            try { window.addEventListener('load', async () => {
                 osContainer.style.visibility = 'hidden';
                 taskbar.classList.add('hidden');
                 applyVisualEffects();
@@ -86508,7 +86907,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 taskbar.classList.add('hidden');
                 document.getElementById('mission-control-btn').addEventListener('click', toggleMissionControl);
 
-                const isSetupComplete = JSON.parse(localStorage.getItem('riviftSetupComplete')) || false;
+                const isSetupComplete = __lsParse(localStorage.getItem('riviftSetupComplete')) || false;
 
                 const bootScreen = document.getElementById('boot-screen');
                 const bootLogo = document.getElementById('boot-logo-container');
@@ -86540,6 +86939,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }, 100);
                 }
             });
+} catch (__riviftErr) { __riviftInitFail("L86413 Expression: window.addEventListener('load', async () => { osContainer.st", __riviftErr); }
 
             function finishSetupAndBoot() {
                 (function startPingLoop() {
@@ -86570,7 +86970,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 })();
 
                 try {
-                    const _customApps = JSON.parse(localStorage.getItem('riviftInstalledApps')) || [];
+                    const _customApps = __lsParse(localStorage.getItem('riviftInstalledApps')) || [];
                     _customApps.forEach(meta => {
                         if (!apps.find(a => a.id === meta.id)) {
                             apps.push({
@@ -86618,7 +87018,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 }
             }
 
-            (function initMagnifier() {
+            try { (function initMagnifier() {
                 const mag = document.getElementById('a11y-magnifier');
                 const magCanvas = document.getElementById('a11y-magnifier-canvas');
                 if (!mag || !magCanvas) return;
@@ -86785,11 +87185,13 @@ ${elementSummary || '画面要素情報はありません。'}`,
 
                 window.updateMagnifierLevel = function () { /* _drawFrame が毎フレーム a11yMagnifierLevel を参照するので自動反映 */ };
             })();
+} catch (__riviftErr) { __riviftInitFail("L86621 Expression: (function initMagnifier() { const mag = document.getElementB", __riviftErr); }
 
-            setInterval(() => {
+            try { setInterval(() => {
                 updateTime();
                 if (desktopWidgets.length > 0) updateAllWidgets();
             }, 1000);
+} catch (__riviftErr) { __riviftInitFail("L86789 Expression: setInterval(() => { updateTime(); if (desktopWidgets.length ", __riviftErr); }
 
             function applyGlassEffectToPanels() {
                 const elementsToStyle = [
@@ -87169,7 +87571,7 @@ ${elementSummary || '画面要素情報はありません。'}`,
 
                     this.registerSyscall('ai_request_permission', (callerPid, action) => {
                         let perms = {};
-                        try { perms = JSON.parse(localStorage.getItem('ai_permissions') || '{}'); } catch { }
+                        try { perms = __lsParse(localStorage.getItem('ai_permissions'), {}); } catch { }
                         const keyAliases = {
                             'ai_perm_fs_write': 'file_create',
                             'ai_perm_fs_delete': 'file_delete',
@@ -87454,11 +87856,13 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 }
             }
 
-            const OS_KERNEL = new Kernel();
+            let OS_KERNEL; try { OS_KERNEL = new Kernel();
+} catch (__riviftErr) { __riviftInitFail("L87457 const: const OS_KERNEL = new Kernel();", __riviftErr); }
 
-            if (typeof MemoryManager !== 'undefined') {
+            try { if (typeof MemoryManager !== 'undefined') {
                 MemoryManager.startMonitoring();
             }
+} catch (__riviftErr) { __riviftInitFail("L87459 If: if (typeof MemoryManager !== 'undefined') { MemoryManager.st", __riviftErr); }
 
             class SystemGuard {
                 constructor() {
@@ -87662,9 +88066,10 @@ ${elementSummary || '画面要素情報はありません。'}`,
                 }
             }
 
-            window.addEventListener('load', () => {
+            try { window.addEventListener('load', () => {
                 window._systemGuard = new SystemGuard();
             });
+} catch (__riviftErr) { __riviftInitFail("L87665 Expression: window.addEventListener('load', () => { window._systemGuard ", __riviftErr); }
 
         });
     </script>
@@ -88893,7 +89298,7 @@ function _getSocket() {
 
             let _deviceName = localStorage.getItem('riviftNearbyDeviceName') || null;
             let _deviceIcon = localStorage.getItem('riviftNearbyDeviceIcon') || null;
-            let _persistentReceiveOn = JSON.parse(localStorage.getItem('riviftNearbyReceiveEnabled') || 'false');
+            let _persistentReceiveOn = __lsParse(localStorage.getItem('riviftNearbyReceiveEnabled'), false);
             let _receiveMode = localStorage.getItem('riviftNearbyReceiveMode') || 'everyone'; // 'everyone' | 'friends'
             let _sendJoinDepth = 0; // 送信のために一時的にjoinした回数（永続設定がOFFの時だけ使う）
             let _peerIcons = new Map(); // nickname -> icon（最新のpeers_updatedから作る簡易キャッシュ）
@@ -96258,7 +96663,7 @@ function _getSocket() {
                 }
 
                 try {
-                    var custom = JSON.parse(localStorage.getItem('riviftCustomWebApps') || '[]');
+                    var custom = __lsParse(localStorage.getItem('riviftCustomWebApps'), []);
                     if (Array.isArray(custom)) {
                         custom.forEach(function (ca) {
                             if (ca && ca.id && !master.has(ca.id)) {
