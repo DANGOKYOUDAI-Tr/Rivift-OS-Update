@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.3.8";
+        var CURRENT_FILE_VERSION = "5.3.9";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -17164,7 +17164,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.3.8';
+            var RIVIFT_OS_VERSION = '5.3.9';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -38667,8 +38667,14 @@ ${assistantAnswer.slice(0, 1000)}
 
                 const numWindows = visibleWindows.length;
                 const padding = 80;
+                // 仮想デスクトップ切り替えバー(名前入力欄を含む)の下端を測り、その下にウィンドウを配置する
+                const mcBarEl = document.getElementById('mc-desktop-bar');
+                const mcBarBottom = mcBarEl
+                    ? Math.round(mcBarEl.getBoundingClientRect().bottom - desktop.getBoundingClientRect().top)
+                    : 160;
+                const topInset = Math.min(Math.max(padding, mcBarBottom + 28), Math.round(desktop.clientHeight * 0.4));
                 const availableWidth = desktop.clientWidth - padding * 2;
-                const availableHeight = desktop.clientHeight - padding * 2;
+                const availableHeight = Math.max(120, desktop.clientHeight - topInset - padding);
                 const cols = Math.ceil(Math.sqrt(numWindows * (availableWidth / availableHeight)));
                 const cellWidth = availableWidth / cols;
                 const cellHeight = availableHeight / Math.ceil(numWindows / cols);
@@ -38691,7 +38697,7 @@ ${assistantAnswer.slice(0, 1000)}
                             newWidth = cellWidth * 0.8; newHeight = newWidth / aspectRatio;
                         }
                         const newX = padding + (i % cols) * cellWidth + (cellWidth - newWidth) / 2;
-                        const newY = padding + Math.floor(i / cols) * cellHeight + (cellHeight - newHeight) / 2;
+                        const newY = topInset + Math.floor(i / cols) * cellHeight + (cellHeight - newHeight) / 2;
                         const scale = newWidth / w;
                         if (animate) win.style.transition = 'transform 0.2s var(--os-ease-standard)';
                         win.style.transformOrigin = 'top left';
@@ -41023,7 +41029,7 @@ function isDeterministicCode(code) {
     return !/\\b(?:rand|srand|time|clock|random|datetime\\.now|perf_counter)\\s*\\(/.test(code);
 }
 
-async function runC(runId, code, stdin, files) {
+async function runC(runId, code, stdin, files, opts) {
     var start = performance.now();
     var effectiveFiles = Object.assign({}, files || {});
     var resolvedCode = code;
@@ -41070,9 +41076,9 @@ async function runC(runId, code, stdin, files) {
 
     if (! shouldForceRemoteC(resolvedCode)) {
         try {
-            var localRes = runLocalC(resolvedCode, stdin || "", effectiveFiles);
+            var localRes = runLocalC(resolvedCode, stdin || "", effectiveFiles, opts);
             var durationMs = Math.max(1, Math.round(performance.now() - start));
-            if (det) {
+            if (det && !localRes.needInput) {
                 if (_execCache.size > 100) _execCache.delete(_execCache.keys().next().value);
                 _execCache.set(cacheKey, { stdout: localRes.stdout, stderr: localRes.stderr, exitCode: localRes.exitCode });
             }
@@ -41082,6 +41088,7 @@ async function runC(runId, code, stdin, files) {
             if (localRes.stderr) {
                 postMessage({ type: "stderr", channel: "c", runId: runId, text: localRes.stderr });
             }
+            if (localRes.needInput) { postMessage({ type: "need-input", channel: "c", runId: runId }); return; }
             postMessage({ type: "done", channel: "c", runId: runId, exitCode: localRes.exitCode, durationMs: durationMs });
             return;
         } catch (localErr) {
@@ -41155,10 +41162,11 @@ async function runC(runId, code, stdin, files) {
     } catch (_) {}
 
     try {
-        var finalRes = runLocalC(resolvedCode, stdin || "", effectiveFiles);
+        var finalRes = runLocalC(resolvedCode, stdin || "", effectiveFiles, opts);
         var durFinal = Math.max(1, Math.round(performance.now() - start));
         if (finalRes.stdout) postMessage({ type: "stdout", channel: "c", runId: runId, text: finalRes.stdout });
         if (finalRes.stderr) postMessage({ type: "stderr", channel: "c", runId: runId, text: finalRes.stderr });
+        if (finalRes.needInput) { postMessage({ type: "need-input", channel: "c", runId: runId }); return; }
         postMessage({ type: "done", channel: "c", runId: runId, exitCode: finalRes.exitCode, durationMs: durFinal });
     } catch (e) {
         var durE = Math.max(1, Math.round(performance.now() - start));
@@ -41171,7 +41179,209 @@ function shouldForceRemoteC(code) {
     return /\\b__asm__\\b|\\basm\\s*\\(|\\btemplate\\s*<[^>]*class[^>]*,/.test(code);
 }
 
-function runLocalC(rawCode, stdinText, vfsFiles) {
+// ---- C preprocessor (#define / #undef / #if / #ifdef / #ifndef / #elif / #else / #endif / #error) ----
+function rvCPreprocess(text) {
+    var macros = Object.create(null);
+    function defObj(name, body) { macros[name] = { params: null, variadic: false, body: body }; }
+    defObj("__STDC__", "1");
+    defObj("__STDC_VERSION__", "201710L");
+    defObj("__STDC_HOSTED__", "1");
+    defObj("__GNUC__", "13");
+    defObj("__linux__", "1");
+    defObj("__unix__", "1");
+    defObj("__FILE__", '"main.c"');
+
+    function isIdStart(c) { return /[A-Za-z_]/.test(c); }
+    function isIdChar(c) { return /[A-Za-z0-9_]/.test(c); }
+    function skipString(s, i) {
+        var j = i + 1;
+        while (j < s.length) {
+            var c = s.charAt(j);
+            if (c === "\\\\") { j += 2; continue; }
+            if (c === '"') return j + 1;
+            j++;
+        }
+        return s.length;
+    }
+    function parseArgs(s, i) {
+        var depth = 0, args = [], cur = "";
+        for (var j = i; j < s.length; j++) {
+            var c = s.charAt(j);
+            if (c === '"') { var e = skipString(s, j); cur += s.slice(j, e); j = e - 1; continue; }
+            if (c === "(") { depth++; if (depth === 1) continue; }
+            else if (c === ")") { depth--; if (depth === 0) { args.push(cur); return { args: args, end: j + 1 }; } }
+            else if (c === "," && depth === 1) { args.push(cur); cur = ""; continue; }
+            cur += c;
+        }
+        return null;
+    }
+    function stringify(arg) {
+        var t = arg.replace(/\\s+/g, " ").replace(/^ | $/g, "");
+        return '"' + t.replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"';
+    }
+    function substitute(m, args, hide, lineNo) {
+        var params = m.params, np = params.length, named = {}, p;
+        for (p = 0; p < np; p++) named[params[p]] = (args[p] !== undefined ? args[p] : "").replace(/^\\s+|\\s+$/g, "");
+        var va = "";
+        if (m.variadic) { va = args.slice(np).join(",").replace(/^\\s+|\\s+$/g, ""); named["__VA_ARGS__"] = va; }
+        var body = m.body.replace(/,\\s*##\\s*__VA_ARGS__/g, va === "" ? "" : ", __VA_ARGS__");
+        var r = "", i = 0, pasted = false;
+        function isParam(id) { return Object.prototype.hasOwnProperty.call(named, id); }
+        while (i < body.length) {
+            var c = body.charAt(i);
+            if (c === '"') { var e = skipString(body, i); r += body.slice(i, e); i = e; pasted = false; continue; }
+            if (c === "#" && body.charAt(i + 1) === "#") {
+                r = r.replace(/\\s+$/, "");
+                i += 2;
+                while (i < body.length && /\\s/.test(body.charAt(i))) i++;
+                pasted = true;
+                continue;
+            }
+            if (c === "#") {
+                var k = i + 1;
+                while (k < body.length && /\\s/.test(body.charAt(k))) k++;
+                if (k < body.length && isIdStart(body.charAt(k))) {
+                    var k2 = k + 1;
+                    while (k2 < body.length && isIdChar(body.charAt(k2))) k2++;
+                    var pid = body.slice(k, k2);
+                    if (isParam(pid)) { r += stringify(named[pid]); i = k2; pasted = false; continue; }
+                }
+                r += c; i++; continue;
+            }
+            if (isIdStart(c)) {
+                var j = i + 1;
+                while (j < body.length && isIdChar(body.charAt(j))) j++;
+                var id = body.slice(i, j);
+                if (isParam(id)) {
+                    var nextPaste = /^\\s*##/.test(body.slice(j));
+                    r += (pasted || nextPaste) ? named[id] : expand(named[id], hide, lineNo);
+                } else {
+                    r += id;
+                }
+                i = j; pasted = false; continue;
+            }
+            if (!/\\s/.test(c)) pasted = false;
+            r += c; i++;
+        }
+        return r;
+    }
+    function expand(s, hide, lineNo) {
+        var out = "", i = 0;
+        while (i < s.length) {
+            var c = s.charAt(i);
+            if (c === '"') { var e = skipString(s, i); out += s.slice(i, e); i = e; continue; }
+            if (isIdStart(c)) {
+                var j = i + 1;
+                while (j < s.length && isIdChar(s.charAt(j))) j++;
+                var id = s.slice(i, j);
+                if (id === "__LINE__") { out += String(lineNo); i = j; continue; }
+                var m = macros[id];
+                if (m && !hide[id]) {
+                    var h2 = Object.assign({}, hide);
+                    h2[id] = true;
+                    if (!m.params) { out += expand(m.body, h2, lineNo); i = j; continue; }
+                    var k = j;
+                    while (k < s.length && /\\s/.test(s.charAt(k))) k++;
+                    if (s.charAt(k) === "(") {
+                        var pa = parseArgs(s, k);
+                        if (pa) {
+                            out += expand(substitute(m, pa.args, hide, lineNo), h2, lineNo);
+                            i = pa.end;
+                            continue;
+                        }
+                    }
+                }
+                out += id; i = j; continue;
+            }
+            if (c >= "0" && c <= "9") {
+                var n = i + 1;
+                while (n < s.length && /[A-Za-z0-9_.]/.test(s.charAt(n))) n++;
+                out += s.slice(i, n); i = n; continue;
+            }
+            out += c; i++;
+        }
+        return out;
+    }
+    function evalIf(expr, lineNo) {
+        var e = expr;
+        e = e.replace(/\\bdefined\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\)/g, function(_, n) { return macros[n] ? "1" : "0"; });
+        e = e.replace(/\\bdefined\\s+([A-Za-z_][A-Za-z0-9_]*)/g, function(_, n) { return macros[n] ? "1" : "0"; });
+        e = expand(e, {}, lineNo);
+        e = e.replace(/\\b(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]+\\b/g, "$1");
+        e = e.replace(/\\b[A-Za-z_][A-Za-z0-9_]*\\b/g, "0");
+        if (!/^[0-9a-fA-FxX\\s+\\-*\\/%()<>=!&|^~?:.]*$/.test(e) || /^\\s*$/.test(e)) return false;
+        try { return !!(new Function("return (" + e + ") ? 1 : 0")()); } catch (_) { return false; }
+    }
+    function failDirective(msg) {
+        var err = new Error(msg);
+        err.__cRuntimeError = true;
+        throw err;
+    }
+
+    var lines = text.split("\\n"), outLines = [], stack = [];
+    function active() { return stack.length === 0 || stack[stack.length - 1].on; }
+    for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        var dm = /^\\s*#\\s*([A-Za-z_]*)\\s*(.*)$/.exec(line);
+        if (!dm) { outLines.push(active() ? expand(line, {}, li + 1) : ""); continue; }
+        var dir = dm[1], rest = dm[2].replace(/\\s+$/, ""), top;
+        if (dir === "if" || dir === "ifdef" || dir === "ifndef") {
+            var parentOn = active(), cond = false;
+            if (parentOn) {
+                if (dir === "if") cond = evalIf(rest, li + 1);
+                else {
+                    var nm = rest.split(/\\s+/)[0];
+                    cond = !!macros[nm];
+                    if (dir === "ifndef") cond = !cond;
+                }
+            }
+            stack.push({ on: parentOn && cond, taken: parentOn && cond, parent: parentOn });
+        } else if (dir === "elif") {
+            top = stack[stack.length - 1];
+            if (top) {
+                if (!top.parent || top.taken) top.on = false;
+                else { var c2 = evalIf(rest, li + 1); top.on = c2; if (c2) top.taken = true; }
+            }
+        } else if (dir === "else") {
+            top = stack[stack.length - 1];
+            if (top) {
+                if (!top.parent || top.taken) top.on = false;
+                else { top.on = true; top.taken = true; }
+            }
+        } else if (dir === "endif") {
+            stack.pop();
+        } else if (active()) {
+            if (dir === "define") {
+                var dd = /^([A-Za-z_][A-Za-z0-9_]*)(\\(([^)]*)\\))?\\s*(.*)$/.exec(rest);
+                if (dd) {
+                    if (dd[2] !== undefined) {
+                        var plist = dd[3].replace(/^\\s+|\\s+$/g, "") === "" ? [] : dd[3].split(",").map(function(x) { return x.replace(/^\\s+|\\s+$/g, ""); });
+                        var variadic = false;
+                        if (plist.length && /^(?:\\.\\.\\.|[A-Za-z_][A-Za-z0-9_]*\\.\\.\\.)$/.test(plist[plist.length - 1])) { variadic = true; plist.pop(); }
+                        macros[dd[1]] = { params: plist, variadic: variadic, body: dd[4] };
+                    } else {
+                        macros[dd[1]] = { params: null, variadic: false, body: dd[4] };
+                    }
+                }
+            } else if (dir === "undef") {
+                delete macros[rest.split(/\\s+/)[0]];
+            } else if (dir === "error") {
+                failDirective("#error " + rest);
+            }
+        }
+        outLines.push("");
+    }
+    return outLines.join("\\n");
+}
+
+function runLocalC(rawCode, stdinText, vfsFiles, opts) {
+    opts = opts || {};
+    var rvNeedMore = !!opts.interactive && !opts.eof;
+    var rvBlocked = -1, rvBlockedErr = -1;
+    function rvNeed() {
+        if (rvBlocked < 0) { rvBlocked = out.length; rvBlockedErr = errOut.length; }
+        throw { __needInput: true };
+    }
     var out = "";
     var errOut = "";
     var filesMap = Object.assign({}, vfsFiles || {});
@@ -41181,6 +41391,12 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
     var lineIdx = 0;
     var charIdx = 0;
     var rawStdinStr = String(stdinText || "");
+    var rvLineCount = (function() {
+        var t = rawStdinStr;
+        if (t === "") return 0;
+        var n = t.split(/\\r?\\n/).length;
+        return /\\n$/.test(t) ? n - 1 : n;
+    })();
 
     function cSprintf(fmt) {
         var args = Array.prototype.slice.call(arguments, 1);
@@ -41285,6 +41501,7 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
         return { __isFile: true, name: clean, content: s, pos: 0, lines: s.split(/\\r?\\n/), lineIdx: 0 };
     }
     function __c_fgetc(fp) {
+        if (fp && fp.__isStdin) return __c_getchar();
         if (!fp || !fp.__isFile) return -1;
         if (fp.pos >= fp.content.length) return -1;
         return fp.content.charCodeAt(fp.pos++);
@@ -41305,6 +41522,16 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
         return Math.floor(total / (sz || 1));
     }
     function __c_fgets(buf, sz, fp) {
+        if (fp && fp.__isStdin) {
+            if (lineIdx >= rvLineCount) { if (rvNeedMore) rvNeed(); return null; }
+            var sl = stdinLines[lineIdx++] + NL;
+            if (Array.isArray(buf)) {
+                buf.length = 0;
+                for (var si = 0; si < sl.length; si++) buf.push(sl.charAt(si));
+                buf.toString = function() { return this.join(""); };
+            }
+            return sl;
+        }
         if (!fp || !fp.__isFile) return null;
         if (fp.lineIdx >= fp.lines.length) return null;
         var ln = fp.lines[fp.lineIdx++];
@@ -41334,7 +41561,7 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
         return c;
     }
     function __c_getchar() {
-        if (charIdx >= rawStdinStr.length) return -1;
+        if (charIdx >= rawStdinStr.length) { if (rvNeedMore) rvNeed(); return -1; }
         return rawStdinStr.charCodeAt(charIdx++);
     }
     function __c_scanf(fmt) {
@@ -41342,7 +41569,7 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
         var res = [];
         for (var i = 0; i < specs.length; i++) {
             var tok = stdinTokens[tokenIdx++];
-            if (tok === undefined) tok = "0";
+            if (tok === undefined) { if (rvNeedMore) rvNeed(); tok = "0"; }
             var sp = specs[i];
             var lastCh = sp.charAt(sp.length - 1);
             if (lastCh === "s") res.push(tok);
@@ -41355,16 +41582,18 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
     }
     function __c_cin_next() {
         var tok = stdinTokens[tokenIdx++];
-        if (tok === undefined) return 0;
+        if (tok === undefined) { if (rvNeedMore) rvNeed(); return 0; }
         var num = Number(tok);
         return isNaN(num) ? tok : num;
     }
     function __c_gets() {
+        if (lineIdx >= rvLineCount) { if (rvNeedMore) rvNeed(); return ""; }
         return stdinLines[lineIdx++] || "";
     }
 
     var src = rawCode.replace(/"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/.*$/gm, function(m) {
-        return (m.charAt(0) === '"' || m.charAt(0) === "'") ? m : "";
+        if (m.charAt(0) === '"' || m.charAt(0) === "'") return m;
+        return m.charAt(1) === "*" ? m.replace(/[^\\n]/g, "") : "";
     });
 
     src = src.replace(/'(\\\\.|[^'\\\\])'/g, function(m, ch) {
@@ -41378,13 +41607,15 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
 
     src = src.replace(/\\\\\\r?\\n/g, " ");
 
-    src = src.replace(/^[ \\t]*#[ \\t]*define[ \\t]+([A-Za-z_][A-Za-z0-9_]*)\\(([^)]*)\\)[ \\t]+([^\\r\\n]+)$/gm,
-        "function $1($2) { return ($3); }");
+    src = rvCPreprocess(src);
 
-    src = src.replace(/^[ \\t]*#[ \\t]*define[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]+([^\\r\\n]+)$/gm,
-        "var $1 = ($2);");
+    for (var rvJ = 0; rvJ < 8; rvJ++) {
+        var rvPrevSrc = src;
+        src = src.replace(/"((?:\\\\.|[^"\\\\\\n])*)"[ \\t\\r\\n]*"((?:\\\\.|[^"\\\\\\n])*)"/g, '"$1$2"');
+        if (src === rvPrevSrc) break;
+    }
 
-    src = src.replace(/^[ \\t]*#[ \\t]*[a-zA-Z]+.*$/gm, "");
+    src = src.replace(/(^|\\n)([ \\t]*)main[ \\t]*\\(/g, "$1$2int main(");
 
     src = src.replace(/\\b(?:typedef\\s+)?enum(?:\\s+[A-Za-z_][A-Za-z0-9_]*)?\\s*\\{([^}]*)\\}(?:\\s*[A-Za-z_][A-Za-z0-9_]*)?\\s*;/g, function(_, body) {
         var curVal = 0;
@@ -41562,6 +41793,7 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
         "const qsort = (arr, n, sz, cmp) => { if (Array.isArray(arr)) arr.sort(cmp || ((a,b)=>a-b)); };",
         "const assert = (cond) => { if (!cond) { const e = new Error('Assertion failed'); e.__cRuntimeError = true; throw e; } };",
         "const exit = (c) => { throw { __cExit: true, code: c || 0 }; };",
+        "const stdin = { __isStdin: true };",
         "const fopen = __c_fopen, fgets = __c_fgets, fputs = __c_fputs, fclose = __c_fclose, fprintf = __c_fprintf, sprintf = cSprintf, snprintf = (b, n, f, ...a) => cSprintf(f, ...a);",        "const fgetc = __c_fgetc, feof = __c_feof, getc = __c_fgetc, fread = __c_fread, fseek = () => 0, ftell = (fp) => (fp && fp.__isFile ? fp.pos : 0), rewind = (fp) => { if (fp && fp.__isFile) { fp.pos = 0; fp.lineIdx = 0; } };",
         "const LoadFileText = (p) => { const f = __c_fopen(p, 'r'); return f ? f.content : ''; }, UnloadFileText = () => {}, FileExists = (p) => !!__c_fopen(p, 'r');",
         "const __c_make_arr = (len, init) => { const a = new Array(Math.max(len || 0, init.length)).fill(0); for (let i = 0; i < init.length; i++) a[i] = init[i]; return a; };",
@@ -41570,7 +41802,15 @@ function runLocalC(rawCode, stdinText, vfsFiles) {
 
     var runnerFn = new Function("__c_printf", "__c_fprintf", "__c_puts", "__c_putchar", "__c_getchar", "__c_scanf", "__c_cin_next", "__c_gets", "cSprintf", "Math", "__c_fopen", "__c_fgets", "__c_fputs", "__c_fclose", "__c_fgetc", "__c_feof", "__c_fread",
         stdlibPrelim + "\\n" + src + "\\nif (typeof main === 'function') { try { const _ret = main(1, ['program']); return typeof _ret === 'number' ? _ret : 0; } catch(_e) { if (_e && _e.__cExit) return _e.code; throw _e; } } return 0;");
-    var exitCode = runnerFn(__c_printf, __c_fprintf, __c_puts, __c_putchar, __c_getchar, __c_scanf, __c_cin_next, __c_gets, cSprintf, Math, __c_fopen, __c_fgets, __c_fputs, __c_fclose, __c_fgetc, __c_feof, __c_fread);
+    var exitCode;
+    try {
+        exitCode = runnerFn(__c_printf, __c_fprintf, __c_puts, __c_putchar, __c_getchar, __c_scanf, __c_cin_next, __c_gets, cSprintf, rvMathFor(opts), __c_fopen, __c_fgets, __c_fputs, __c_fclose, __c_fgetc, __c_feof, __c_fread);
+    } catch (rvErr) {
+        if (!(rvErr && rvErr.__needInput) && rvBlocked < 0) throw rvErr;
+    }
+    if (rvBlocked >= 0) {
+        return { stdout: out.slice(0, rvBlocked), stderr: errOut.slice(0, rvBlockedErr), exitCode: 0, needInput: true };
+    }
     return { stdout: out, stderr: errOut, exitCode: typeof exitCode === "number" ? exitCode : 0 };
 }
 
@@ -41578,7 +41818,20 @@ function shouldForceRemotePython(code) {
     return /^\\s*(?:import|from)\\s+(?:numpy|pandas|matplotlib|scipy|sympy|sklearn|cv2|PIL|requests|asyncio)\\b/m.test(code);
 }
 
-function runLocalPython(rawCode, stdinText, vfsFiles) {
+function runLocalPython(rawCode, stdinText, vfsFiles, opts) {
+    opts = opts || {};
+    var rvNeedMore = !!opts.interactive && !opts.eof;
+    var rvBlocked = -1;
+    var rvLineCount = (function() {
+        var t = String(stdinText || "");
+        if (t === "") return 0;
+        var n = t.split(/\\r?\\n/).length;
+        return /\\n$/.test(t) ? n - 1 : n;
+    })();
+    function rvNeed() {
+        if (rvBlocked < 0) rvBlocked = out.length;
+        throw { __needInput: true };
+    }
     var out = "";
     var filesMap = Object.assign({}, vfsFiles || {});
     var stdinLines = String(stdinText || "").split(/\\r?\\n/);
@@ -41676,6 +41929,7 @@ function runLocalPython(rawCode, stdinText, vfsFiles) {
 
     function __py_input(promptText) {
         if (promptText !== undefined && promptText !== "") out += String(promptText);
+        if (lineIdx >= rvLineCount) { if (rvNeedMore) rvNeed(); return ""; }
         return stdinLines[lineIdx++] || "";
     }
 
@@ -41883,11 +42137,16 @@ function runLocalPython(rawCode, stdinText, vfsFiles) {
 
     var fn = new Function("__py_print", "__py_input", "__py_range", "__py_str", "__py_fmt", "Math", "__py_open",
         pyPrelim + "\\n" + jsLines.join("\\n"));
-    fn(__py_print, __py_input, __py_range, __py_str, __py_fmt, Math, __py_open);
+    try {
+        fn(__py_print, __py_input, __py_range, __py_str, __py_fmt, rvMathFor(opts), __py_open);
+    } catch (rvErr) {
+        if (!(rvErr && rvErr.__needInput) && rvBlocked < 0) throw rvErr;
+    }
+    if (rvBlocked >= 0) return { stdout: out.slice(0, rvBlocked), stderr: "", exitCode: 0, needInput: true };
     return { stdout: out, stderr: "", exitCode: 0 };
 }
 
-async function runPython(runId, code, stdin, files) {
+async function runPython(runId, code, stdin, files, opts) {
     var start = performance.now();
     var cacheKey = getCacheKey("python", code, stdin);
     var det = isDeterministicCode(code) && (!files || Object.keys(files).length === 0);
@@ -41902,19 +42161,25 @@ async function runPython(runId, code, stdin, files) {
 
     if (!shouldForceRemotePython(code)) {
         try {
-            var localPy = runLocalPython(code, stdin || "", files || {});
+            var localPy = runLocalPython(code, stdin || "", files || {}, opts);
             var durLocal = Math.max(1, Math.round(performance.now() - start));
-            if (det) {
+            if (det && !localPy.needInput) {
                 if (_execCache.size > 100) _execCache.delete(_execCache.keys().next().value);
                 _execCache.set(cacheKey, { stdout: localPy.stdout, stderr: "", exitCode: 0 });
             }
             if (localPy.stdout) {
                 postMessage({ type: "stdout", channel: "python", runId: runId, text: localPy.stdout });
             }
+            if (localPy.needInput) { postMessage({ type: "need-input", channel: "python", runId: runId }); return; }
             postMessage({ type: "done", channel: "python", runId: runId, exitCode: 0, durationMs: durLocal });
             return;
         } catch (_) {
         }
+    }
+
+    if (opts && opts.interactive) {
+        await rvRunPyodideInteractive(runId, code, stdin, files, opts, start);
+        return;
     }
 
     if (self._pyodide) {
@@ -42027,14 +42292,168 @@ async function runPython(runId, code, stdin, files) {
     }
 }
 
+// ---- interactive stdin support (replay model) ----
+function rvMathFor(opts) {
+    if (!opts || opts.seed === undefined || opts.seed === null) return Math;
+    var s = (opts.seed >>> 0) || 1;
+    var m = Object.create(Math);
+    m.random = function() {
+        s = (s + 0x6D2B79F5) | 0;
+        var t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    return m;
+}
+
+var RV_PY_SETUP = [
+"import sys, builtins",
+"class RiviftNeedInput(BaseException):",
+"    pass",
+"builtins.RiviftNeedInput = RiviftNeedInput",
+"_rv_saved = (sys.stdin, sys.stdout, sys.stderr)",
+"class _RvOut:",
+"    encoding = 'utf-8'",
+"    errors = 'strict'",
+"    def __init__(self, cb):",
+"        self._cb = cb",
+"    def write(self, s):",
+"        s = str(s)",
+"        if s:",
+"            self._cb(s)",
+"        return len(s)",
+"    def flush(self):",
+"        pass",
+"    def isatty(self):",
+"        return False",
+"    def writable(self):",
+"        return True",
+"    def readable(self):",
+"        return False",
+"class _RvIn:",
+"    encoding = 'utf-8'",
+"    errors = 'strict'",
+"    def __init__(self, text, eof):",
+"        self._t = text",
+"        self._p = 0",
+"        self._eof = eof",
+"    def _need(self):",
+"        RV_BLOCK()",
+"        raise RiviftNeedInput()",
+"    def readline(self, size=-1):",
+"        if self._p >= len(self._t):",
+"            if not self._eof:",
+"                self._need()",
+"            return ''",
+"        i = self._t.find(chr(10), self._p)",
+"        j = len(self._t) if i < 0 else i + 1",
+"        line = self._t[self._p:j]",
+"        self._p = j",
+"        return line",
+"    def read(self, size=-1):",
+"        if size is None or size < 0:",
+"            if not self._eof:",
+"                self._need()",
+"            r = self._t[self._p:]",
+"            self._p = len(self._t)",
+"            return r",
+"        if self._p >= len(self._t) and not self._eof:",
+"            self._need()",
+"        r = self._t[self._p:self._p + size]",
+"        self._p += len(r)",
+"        return r",
+"    def readlines(self, hint=-1):",
+"        if not self._eof:",
+"            self._need()",
+"        res = []",
+"        while True:",
+"            l = self.readline()",
+"            if not l:",
+"                break",
+"            res.append(l)",
+"        return res",
+"    def __iter__(self):",
+"        return self",
+"    def __next__(self):",
+"        l = self.readline()",
+"        if not l:",
+"            raise StopIteration",
+"        return l",
+"    def isatty(self):",
+"        return False",
+"    def readable(self):",
+"        return True",
+"    def writable(self):",
+"        return False",
+"sys.stdout = _RvOut(RV_OUT)",
+"sys.stderr = _RvOut(RV_ERR)",
+"sys.stdin = _RvIn(RV_TEXT, RV_EOF)",
+"import random as _rv_random",
+"_rv_random.seed(RV_SEED)"
+].join(String.fromCharCode(10));
+
+async function rvRunPyodideInteractive(runId, code, stdin, files, opts, start) {
+    var blocked = false;
+    var py = null;
+    var ns = null;
+    var errMsg = null;
+    var resTxt = "";
+    try {
+        if (!self._pyodide) {
+            postMessage({ type: "progress", channel: "python", runId: runId, pct: 50, text: "Pyodide WASM初期化中…" });
+            if (typeof loadPyodide === "undefined") {
+                importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js");
+            }
+            self._pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/" });
+        }
+        py = self._pyodide;
+        if (files && typeof files === "object") {
+            Object.keys(files).forEach(function(fn) {
+                try { py.FS.writeFile(fn.split("/").pop(), String(files[fn])); } catch (_) {}
+            });
+        }
+        py.globals.set("RV_OUT", function(s) { if (!blocked) postMessage({ type: "stdout", channel: "python", runId: runId, text: String(s) }); });
+        py.globals.set("RV_ERR", function(s) { if (!blocked) postMessage({ type: "stderr", channel: "python", runId: runId, text: String(s) }); });
+        py.globals.set("RV_BLOCK", function() { blocked = true; });
+        py.globals.set("RV_TEXT", String(stdin || ""));
+        py.globals.set("RV_EOF", !!opts.eof);
+        py.globals.set("RV_SEED", (opts.seed >>> 0) || 1);
+        await py.runPythonAsync(RV_PY_SETUP);
+        ns = py.runPython("{'__name__': '__main__'}");
+        postMessage({ type: "progress", channel: "python", runId: runId, pct: 85, text: "Pythonコード実行中…" });
+        await py.loadPackagesFromImports(code).catch(function() {});
+        var res = await py.runPythonAsync(code, { globals: ns });
+        if (!blocked && res !== undefined && res !== null && code.indexOf("print(") === -1) {
+            resTxt = String(res) + NL;
+        }
+    } catch (e) {
+        if (!blocked) errMsg = String(e && e.message || e);
+    } finally {
+        try { if (py) await py.runPythonAsync("sys.stdin, sys.stdout, sys.stderr = _rv_saved"); } catch (_) {}
+        try { if (ns && ns.destroy) ns.destroy(); } catch (_) {}
+    }
+    if (blocked) {
+        postMessage({ type: "need-input", channel: "python", runId: runId });
+        return;
+    }
+    var dur = Math.max(1, Math.round(performance.now() - start));
+    if (errMsg) {
+        postMessage({ type: "stderr", channel: "python", runId: runId, text: "[Pythonエラー] " + errMsg + NL });
+        postMessage({ type: "done", channel: "python", runId: runId, error: errMsg, exitCode: 1, durationMs: dur });
+        return;
+    }
+    if (resTxt) postMessage({ type: "stdout", channel: "python", runId: runId, text: resTxt });
+    postMessage({ type: "done", channel: "python", runId: runId, exitCode: 0, durationMs: dur });
+}
+
 self.addEventListener("message", function(ev) {
     var msg = ev.data || {};
     if (msg.type === "init-cc" || msg.type === "init") {
         postMessage({ type: "cc-status", state: "ready", detail: "Rivift Code Runner 準備完了" });
     } else if (msg.type === "run-c") {
-        runC(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {});
+        runC(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {}, { interactive: !!msg.interactive, eof: !!msg.eof, seed: msg.seed });
     } else if (msg.type === "run-python") {
-        runPython(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {});
+        runPython(msg.runId || 1, msg.code, msg.stdin || msg.input || "", msg.files || {}, { interactive: !!msg.interactive, eof: !!msg.eof, seed: msg.seed });
     }
 });`;
 
@@ -42096,6 +42515,82 @@ self.addEventListener("message", function(ev) {
                 if (window._riviftRunnerPool) window._riviftRunnerPool.ensureWorker();
             }, 100);
 } catch (__riviftErr) { __riviftInitFail("L41764 Expression: setTimeout(() => { if (window._riviftRunnerPool) window._riv", __riviftErr); }
+
+            try { window._riviftCreateInteractiveRun = function(cfg) {
+    // 実行中の標準入力を扱う制御クラス。
+    // プログラムが入力を要求 → ワーカーが need-input を返す → 入力を蓄積して再実行(出力済み部分は読み飛ばす)
+    const pool = window._riviftRunnerPool;
+    const st = {
+        acc: String(cfg.stdin || ''), eof: false, runs: 0, sentLen: 0,
+        shownOut: 0, shownErr: 0, skipOut: 0, skipErr: 0,
+        waiting: false, finished: false,
+        seed: ((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0) || 1
+    };
+    const msgType = cfg.lang === 'python' ? 'run-python' : 'run-c';
+    function cut(text, kind) {
+        const skipKey = kind === 'err' ? 'skipErr' : 'skipOut';
+        const shownKey = kind === 'err' ? 'shownErr' : 'shownOut';
+        let t = String(text || '');
+        if (st[skipKey] > 0) {
+            if (t.length <= st[skipKey]) { st[skipKey] -= t.length; return ''; }
+            t = t.slice(st[skipKey]);
+            st[skipKey] = 0;
+        }
+        st[shownKey] += t.length;
+        return t;
+    }
+    let worker = null;
+    function start() {
+        st.runs++;
+        st.waiting = false;
+        st.skipOut = st.shownOut;
+        st.skipErr = st.shownErr;
+        st.sentLen = st.acc.length;
+        worker.postMessage({
+            type: msgType, runId: Date.now(), code: cfg.code, stdin: st.acc,
+            files: cfg.files || {}, interactive: true, eof: st.eof, seed: st.seed
+        });
+    }
+    function onMessage(ev) {
+        const msg = ev.data || {};
+        if (msg.type === 'need-input') {
+            if (st.acc.length > st.sentLen || (st.eof && !st.eofSent)) { st.eofSent = st.eof; start(); return; }
+            st.waiting = true;
+            if (cfg.onNeedInput) cfg.onNeedInput();
+            return;
+        }
+        if (msg.type === 'stdout' || msg.type === 'stderr') {
+            const t = cut(msg.text, msg.type === 'stderr' ? 'err' : 'out');
+            if (!t) return;
+            if (cfg.onMessage) cfg.onMessage({ data: Object.assign({}, msg, { text: t }) });
+            return;
+        }
+        if (msg.type === 'compile-log' && st.runs > 1) return;
+        if (msg.type === 'progress' && st.runs > 1) return;
+        if (msg.type === 'done') { st.finished = true; st.waiting = false; }
+        if (cfg.onMessage) cfg.onMessage(ev);
+    }
+    worker = pool.acquire(onMessage, cfg.onError || function() {});
+    return {
+        worker: worker,
+        start: start,
+        send: function(line) {
+            if (st.finished) return false;
+            st.acc += String(line) + '\n';
+            if (st.waiting) start();
+            return true;
+        },
+        sendEof: function() {
+            if (st.finished) return false;
+            st.eof = true;
+            if (st.waiting) { st.eofSent = true; start(); }
+            return true;
+        },
+        isWaiting: function() { return st.waiting; },
+        isFinished: function() { return st.finished; }
+    };
+};
+} catch (__riviftErr) { __riviftInitFail("interactive-run controller", __riviftErr); }
 
             try { window._riviftGetMainThreadCEngine = async function() {
                 return {
@@ -60400,7 +60895,8 @@ body.light-mode #rhe-root {
                                 (/^\s*\.(?:global|globl)\b|^\s*_start\s*:/m.test(trimmed) && /\b(mov|add|sub|ldr|str|cmp|swi|bx\s+lr)\b/i.test(trimmed))) {
                                 return 'arm32';
                             }
-                            if (trimmed.startsWith('#include') || trimmed.includes('int main(') || trimmed.includes('printf(') || trimmed.includes('std::cout')) {
+                            if (trimmed.startsWith('#include') || trimmed.includes('int main(') || trimmed.includes('printf(') || trimmed.includes('std::cout') ||
+                                /^[ \t]*#[ \t]*(?:define|ifdef|ifndef|if|pragma)\b/m.test(trimmed) || /(?:^|\n)[ \t]*(?:int|void)?[ \t]*main[ \t]*\([^)]*\)[ \t]*\{/.test(trimmed)) {
                                 return 'c';
                             }
                             if (trimmed.includes('def ') || trimmed.includes('import ') || trimmed.includes('print(') || trimmed.includes('__name__')) {
@@ -61903,6 +62399,7 @@ body.light-mode #rhe-root {
                         }
 
                         let isWorkerRunning = false;
+                        let rvDockSession = null;
                         let splitCleanupFn = null;
                         function getActiveSearchDirs() {
                             const activeTab = openTabs.find(t => t.id === activeTabId);
@@ -61928,6 +62425,11 @@ body.light-mode #rhe-root {
                             }
                             isWorkerRunning = false;
                             activeRunnerWorker = null;
+                            rvDockSession = null;
+                            try {
+                                const _rvIn = typeof rheSt === 'function' ? rheSt('rhe-stdin-in') : null;
+                                if (_rvIn && _rvIn.dataset.rvPh !== undefined) { _rvIn.placeholder = _rvIn.dataset.rvPh; delete _rvIn.dataset.rvPh; }
+                            } catch (_) {}
                         }
 
                         function appendDockLog(text, cls = '') {
@@ -62224,8 +62726,21 @@ body.light-mode #rhe-root {
 
                             try {
                                 isWorkerRunning = true;
-                                activeRunnerWorker = window._riviftRunnerPool.acquire(
-                                    (ev) => {
+                                rvDockSession = window._riviftCreateInteractiveRun({
+                                    lang: lang === 'python' ? 'python' : 'c',
+                                    code: bundledCode,
+                                    files: vfsFiles,
+                                    stdin: (customStdin !== null ? customStdin : lastProgramStdin) || '',
+                                    onNeedInput: () => {
+                                        if (dockStatus) dockStatus.textContent = '入力待ち';
+                                        const _inp = rheSt('rhe-stdin-in');
+                                        if (_inp) {
+                                            if (_inp.dataset.rvPh === undefined) _inp.dataset.rvPh = _inp.placeholder;
+                                            _inp.placeholder = 'プログラムが入力待ちです — 入力して Enter (Ctrl+D で EOF)';
+                                            _inp.focus();
+                                        }
+                                    },
+                                    onMessage: (ev) => {
                                         const msg = ev.data || {};
                                         if (msg.type === 'progress') {
                                             if (dockStatus) dockStatus.textContent = `${msg.text} (${Math.round(msg.pct || 0)}%)`;
@@ -62259,21 +62774,14 @@ body.light-mode #rhe-root {
                                             stopIntegratedExecution(false);
                                         }
                                     },
-                                    (err) => {
+                                    onError: (err) => {
                                         appendDockLog(`\n[Workerエラー] ${err?.message || err}\n`, 'rhe-log-err');
                                         if (dockStatus) dockStatus.textContent = 'エラー';
                                         stopIntegratedExecution(true);
                                     }
-                                );
-
-                                const stdinVal = customStdin !== null ? customStdin : lastProgramStdin;
-                                activeRunnerWorker.postMessage({
-                                    type: lang === 'python' ? 'run-python' : 'run-c',
-                                    runId: Date.now(),
-                                    code: bundledCode,
-                                    stdin: stdinVal || '',
-                                    files: vfsFiles
                                 });
+                                activeRunnerWorker = rvDockSession.worker;
+                                rvDockSession.start();
                             } catch (err) {
                                 appendDockLog(`\n[Worker起動エラー] ${err.message}\n`, 'rhe-log-err');
                                 if (dockStatus) dockStatus.textContent = 'エラー';
@@ -62637,15 +63145,18 @@ body.light-mode #rhe-root {
 
                         const handleDockInput = async () => {
                             const inp = rheSt('rhe-stdin-in');
-                            if (!inp || !inp.value.trim()) return;
+                            if (!inp) return;
+                            if (rvDockSession && !rvDockSession.isFinished()) {
+                                const rawLine = inp.value;
+                                inp.value = '';
+                                appendDockLog(rawLine + '\n', 'rhe-log-sys');
+                                rvDockSession.send(rawLine);
+                                return;
+                            }
+                            if (!inp.value.trim()) return;
                             const val = inp.value.trim();
                             inp.value = '';
                             appendDockLog(`$ ${val}\n`, 'rhe-log-sys');
-
-                            if (activeRunnerWorker) {
-                                activeRunnerWorker.postMessage({ type: 'stdin', text: val });
-                                return;
-                            }
 
                             const parts = val.split(/\s+/);
                             const cmd = parts[0].toLowerCase();
@@ -62748,7 +63259,14 @@ body.light-mode #rhe-root {
                             }
                         };
                         rheSt('rhe-stdin-send')?.addEventListener('click', handleDockInput);
-                        rheSt('rhe-stdin-in')?.addEventListener('keydown', e => { if (e.key === 'Enter') handleDockInput(); });
+                        rheSt('rhe-stdin-in')?.addEventListener('keydown', e => {
+                            if (e.key === 'Enter' && !e.isComposing) handleDockInput();
+                            else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D') && rvDockSession && !rvDockSession.isFinished()) {
+                                e.preventDefault();
+                                appendDockLog('^D\n', 'rhe-log-sys');
+                                rvDockSession.sendEof();
+                            }
+                        });
 
                         rheSt('rhe-st-lang')?.addEventListener('change', (e) => {
                             const mlang = e.target.value;
@@ -62971,6 +63489,7 @@ launcher: (params = {}) => {
         '                <span class="cr-stdin-prompt">&gt;</span>',
         '                <input type="text" class="cr-stdin-input" id="cr-stdin-input-' + windowId + '" placeholder="stdin (Enter to send)..." autocomplete="off">',
         '                <button class="cr-btn" id="cr-stdin-send-' + windowId + '">送信</button>',
+        '                <button class="cr-btn" id="cr-stdin-eof-' + windowId + '" title="入力終了 (EOF / Ctrl+D)">EOF</button>',
         '            </div>',
         '        </div>',
         '        <div class="cr-view-canvas" id="cr-canvas-view-' + windowId + '">',
@@ -63092,11 +63611,14 @@ launcher: (params = {}) => {
             '.cr-term-output .ok { color:#6a9955; font-weight:600; }',
             '.cr-term-output .out { color:#d4d4d4; }',
             '.cr-term-output .dim { color:#757575; }',
+            '.cr-term-output .in { color:#9cdcfe; }',
             '.cr-stdin-bar { display:none; padding:6px 12px; background:#222; border-top:1px solid #333; gap:8px; align-items:center; }',
             '.cr-stdin-bar.active { display:flex; }',
             '.cr-stdin-prompt { color:#6a9955; font-size:13px; font-weight:700; }',
             '.cr-stdin-input { flex:1; background:#181818; border:1px solid #3a3a3a; padding:4px 8px; color:#d4d4d4; font-family:inherit; font-size:12px; outline:none; border-radius:2px; }',
             '.cr-stdin-input:focus { border-color:#0e639c; }',
+            '.cr-stdin-bar.waiting { background:#1b2a38; }',
+            '.cr-stdin-bar.waiting .cr-stdin-input { border-color:#0e639c; box-shadow:0 0 0 1px #0e639c; }',
             '.cr-view-canvas { flex:1; height:100%; display:none; flex-direction:column; background:#111; align-items:center; justify-content:center; }',
             '.cr-view-canvas.active { display:flex; }',
             '.cr-canvas-container { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; width:100%; height:calc(100% - 36px); }',
@@ -63536,7 +64058,8 @@ launcher: (params = {}) => {
             return 'arm32';
         }
 
-        if (trimmed.startsWith('#include') || trimmed.includes('int main(') || trimmed.includes('printf(')) return 'c';
+        if (trimmed.startsWith('#include') || trimmed.includes('int main(') || trimmed.includes('printf(') ||
+            /^[ \t]*#[ \t]*(?:define|ifdef|ifndef|if|pragma)\b/m.test(trimmed) || /(?:^|\n)[ \t]*(?:int|void)?[ \t]*main[ \t]*\([^)]*\)[ \t]*\{/.test(trimmed)) return 'c';
         if (trimmed.includes('def ') || trimmed.includes('import ') || trimmed.includes('print(')) return 'python';
 
         return 'c';
@@ -63943,6 +64466,20 @@ launcher: (params = {}) => {
 
     let activeWorker = null;
     let isWorkerBusy = false;
+    let interactiveRun = null;
+    let pendingRunResolve = null;
+    const stdinEof = appRoot.querySelector('#cr-stdin-eof-' + windowId);
+
+    function setStdinBar(active, waiting) {
+        if (!stdinBar) return;
+        stdinBar.classList.toggle('active', !!active);
+        stdinBar.classList.toggle('waiting', !!waiting);
+        if (stdinInput) {
+            stdinInput.placeholder = waiting
+                ? 'プログラムが入力待ちです — 入力して Enter (Ctrl+D で EOF)'
+                : '標準入力 (Enter で送信 / Ctrl+D で EOF)';
+        }
+    }
 
     function stopActiveWorker(forceKill = false) {
         if (window._riviftRunnerPool) {
@@ -63954,22 +64491,34 @@ launcher: (params = {}) => {
         }
         isWorkerBusy = false;
         activeWorker = null;
+        interactiveRun = null;
+        setStdinBar(false, false);
+        if (pendingRunResolve) {
+            const r = pendingRunResolve;
+            pendingRunResolve = null;
+            r();
+        }
     }
 
     if (stdinSend && stdinInput) {
         const sendStdinVal = function() {
+            if (!interactiveRun || interactiveRun.isFinished()) return;
             const val = stdinInput.value;
-            if (!val) return;
-            termAppend(val + '\n', 'in');
-            currentStdinBuffer += val + '\n';
             stdinInput.value = '';
-            if (activeWorker) {
-                activeWorker.postMessage({ type: 'stdin', text: val });
-            }
+            termAppend(val + '\n', 'in');
+            interactiveRun.send(val);
+            if (!interactiveRun.isWaiting()) setStdinBar(true, false);
+        };
+        const sendEof = function() {
+            if (!interactiveRun || interactiveRun.isFinished()) return;
+            termAppend('^D\n', 'in');
+            interactiveRun.sendEof();
         };
         stdinSend.addEventListener('click', sendStdinVal);
+        if (stdinEof) stdinEof.addEventListener('click', sendEof);
         stdinInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') { e.preventDefault(); sendStdinVal(); }
+            if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendStdinVal(); }
+            else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); sendEof(); }
         });
     }
 
@@ -63979,19 +64528,27 @@ launcher: (params = {}) => {
         switchView('terminal');
         termAppend('[' + (lang === 'c' ? 'C言語 (GCC)' : 'Python 3') + '] 実行開始\n', 'sys');
 
-        if (stdinBar) {
-            if (code.includes('scanf') || code.includes('input(') || code.includes('fgets') || code.includes('cin')) {
-                stdinBar.classList.add('active');
-            }
-        }
+        const mayReadInput = /scanf|input\s*\(|fgets|\bcin\b|getchar|\bgets\s*\(|getline|sys\.stdin|fgetc|getc\s*\(/.test(code);
+        setStdinBar(mayReadInput, false);
 
         const startTime = performance.now();
 
         return new Promise(function(resolve) {
+            pendingRunResolve = resolve;
             try {
                 isWorkerBusy = true;
-                activeWorker = window._riviftRunnerPool.acquire(
-                    function(ev) {
+                interactiveRun = window._riviftCreateInteractiveRun({
+                    lang: lang,
+                    code: code,
+                    files: files || {},
+                    stdin: stdin || '',
+                    onNeedInput: function() {
+                        setProgress(-1);
+                        setStatus('入力待ち', 'running');
+                        setStdinBar(true, true);
+                        if (stdinInput) stdinInput.focus();
+                    },
+                    onMessage: function(ev) {
                         const msg = ev.data || {};
                         if (msg.type === 'progress') {
                             setProgress(msg.pct, msg.text);
@@ -63999,6 +64556,7 @@ launcher: (params = {}) => {
                             termAppend(msg.text, 'dim');
                         } else if (msg.type === 'stdout') {
                             termAppend(msg.text, 'out');
+                            setStdinBar(mayReadInput, false);
                         } else if (msg.type === 'stderr') {
                             termAppend(msg.text, 'err');
                         } else if (msg.type === 'done') {
@@ -64015,7 +64573,7 @@ launcher: (params = {}) => {
                             resolve();
                         }
                     },
-                    function(err) {
+                    onError: function(err) {
                         const m = err && err.message ? err.message : String(err);
                         termAppend('\n[Worker例外] ' + m + '\n', 'err');
                         setStatus('実行エラー', 'error');
@@ -64023,15 +64581,9 @@ launcher: (params = {}) => {
                         stopActiveWorker(true);
                         resolve();
                     }
-                );
-
-                activeWorker.postMessage({
-                    type: lang === 'c' ? 'run-c' : 'run-python',
-                    runId: Date.now(),
-                    code: code,
-                    stdin: stdin || currentStdinBuffer || '',
-                    files: files || {}
                 });
+                activeWorker = interactiveRun.worker;
+                interactiveRun.start();
             } catch (e) {
                 termAppend('\n[初期化エラー] ' + e.message + '\n', 'err');
                 setStatus('エラー', 'error');
@@ -74695,8 +75247,8 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         <div class="sys-card-title">Rivift OS</div>
                         ${[
                                     ['バージョン', `Rivift OS ver.${RIVIFT_OS_VERSION}`],
-                                    ['カーネル', 'Rivift Kernel 3.0'],
-                                    ['ビルド', '2026.10.15'],
+                                    //['カーネル', 'Rivift Kernel 3.0'],
+                                    ['ビルド', '2026.11.12'],
                                     ['アーキテクチャ', 'Web (HTML5/JS)'],
                                     ['開発者', 'DANGOKYOUDAI'],
                                 ].map(([k, v]) => `<div class="sys-net-row"><span style="font-size:12px;opacity:.6;flex:1;">${k}</span><span style="font-size:12px;font-weight:500;">${v}</span></div>`).join('')}
