@@ -37225,8 +37225,66 @@ ${assistantAnswer.slice(0, 1000)}
             try { window._reopenExistingWindowForMobile = _reopenExistingWindowForMobile;
 } catch (__riviftErr) { __riviftInitFail("L36759 Expression: window._reopenExistingWindowForMobile = _reopenExistingWindo", __riviftErr); }
 
-            function _wrapCustomAppHtml(html) {
-                const errorCatcher = `<script>(function(){
+            // ---- カスタムアプリ隔離用ヘルパー（allow-same-origin を外したため、保存・通知は postMessage ブリッジ経由） ----
+            function _riviftAppStorageKey(appId) { return 'riviftAppData:' + appId; }
+            function _riviftLoadAppData(appId) {
+                if (!appId) return {};
+                try {
+                    const o = JSON.parse(localStorage.getItem(_riviftAppStorageKey(appId)) || '{}');
+                    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+                } catch (_) { return {}; }
+            }
+            function _riviftAttachCustomAppBridge(iframe, meta) {
+                const handler = (ev) => {
+                    if (ev.source !== iframe.contentWindow) return;
+                    const d = ev.data;
+                    if (!d || d._riviftTarget !== meta.id) return;
+                    if (d.type === 'notify') {
+                        window.createNotification?.(String(d.title || meta.name).slice(0, 60), String(d.message || '').slice(0, 300), d.level || 'info');
+                    } else if (d.type === 'storage-sync' && d.data && typeof d.data === 'object') {
+                        try {
+                            const clean = {};
+                            Object.keys(d.data).forEach(k => { clean[String(k)] = String(d.data[k]); });
+                            const json = JSON.stringify(clean);
+                            if (json.length > 2 * 1024 * 1024) return;
+                            localStorage.setItem(_riviftAppStorageKey(meta.id), json);
+                        } catch (_) { }
+                    }
+                };
+                window.addEventListener('message', handler);
+                return () => window.removeEventListener('message', handler);
+            }
+
+            function _wrapCustomAppHtml(html, appId) {
+                const _initData = JSON.stringify(_riviftLoadAppData(appId)).replace(/</g, '\\u003c');
+                const _appIdJs = JSON.stringify(appId || '').replace(/</g, '\\u003c');
+                const storageShim = `<script>(function(){
+                    var APP_ID = ${_appIdJs};
+                    var INIT = ${_initData};
+                    var timer = null;
+                    function make(persist) {
+                        var store = Object.create(null);
+                        if (persist) Object.keys(INIT).forEach(function(k){ store[k] = String(INIT[k]); });
+                        function sync() {
+                            if (!persist || !APP_ID) return;
+                            clearTimeout(timer);
+                            timer = setTimeout(function(){
+                                try { parent.postMessage({ _riviftTarget: APP_ID, type: 'storage-sync', data: store }, '*'); } catch (e) {}
+                            }, 150);
+                        }
+                        return {
+                            getItem: function(k){ k = String(k); return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+                            setItem: function(k, v){ store[String(k)] = String(v); sync(); },
+                            removeItem: function(k){ delete store[String(k)]; sync(); },
+                            clear: function(){ store = Object.create(null); sync(); },
+                            key: function(i){ var ks = Object.keys(store); return ks[i] !== undefined ? ks[i] : null; },
+                            get length(){ return Object.keys(store).length; }
+                        };
+                    }
+                    try { Object.defineProperty(window, 'localStorage', { value: make(true), configurable: true }); } catch (e) {}
+                    try { Object.defineProperty(window, 'sessionStorage', { value: make(false), configurable: true }); } catch (e) {}
+                })();<\/script>`;
+                const errorCatcher = storageShim + `<script>(function(){
                     function _riviftShowAppError(msg){
                         try {
                             var box = document.getElementById('__rivift_app_error_box__');
@@ -56564,7 +56622,7 @@ button:hover{filter:brightness(1.08)}
                         document.addEventListener('keydown', _filesShortcutHandler);
 
                         const setupHeader = (path, customTitle = null) => {
-                            const isInfoView = customTitle === '情報';
+                            const isInfoView = customTitle === '情報' || customTitle === 'フォルダ情報';
                             const isTrashView = path === '/Trash';
                             const pathToShow = customTitle || (path === '/' ? 'OS' : path);
 
@@ -56902,14 +56960,14 @@ button:hover{filter:brightness(1.08)}
                             }
                         };
 
-                        const renderFileInfo = async (filePath) => {
-                            setupHeader(currentPath, '情報'); // ヘッダーを「情報」モードに切り替え
+                        const renderFileInfo = async (filePath, isFolderHint = false) => {
+                            setupHeader(currentPath, isFolderHint ? 'フォルダ情報' : '情報'); // ヘッダーを「情報」モードに切り替え
                             grid.className = 'p-4'; // grid-viewとかを解除して、ただのコンテナにする
-                            grid.innerHTML = '<p>情報を読み込み中...</p>';
+                            grid.innerHTML = isFolderHint ? '<p>フォルダ情報を集計中...</p>' : '<p>情報を読み込み中...</p>';
 
                             try {
                                 const fileInfo = await VFS.readFile(filePath);
-                                if (!fileInfo) throw new Error("ファイルが見つかりません。");
+                                if (!fileInfo) throw new Error(isFolderHint ? "フォルダが見つかりません。" : "ファイルが見つかりません。");
 
                                 const formatBytes = (bytes, decimals = 2) => {
                                     if (!bytes || bytes === 0) return '0 Bytes';
@@ -56918,6 +56976,43 @@ button:hover{filter:brightness(1.08)}
                                     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
                                     const i = Math.floor(Math.log(bytes) / Math.log(k));
                                     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+                                }
+
+                                const escHtmlInfo = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+                                if (fileInfo.type === 'folder') {
+                                    // フォルダ: 中身を再帰的に集計（ファイル数・フォルダ数・合計サイズ）
+                                    const LIMIT = 50000;
+                                    let fileCount = 0, folderCount = 0, totalBytes = 0, truncated = false, scanned = 0;
+                                    const stack = [filePath];
+                                    while (stack.length && !truncated) {
+                                        const dir = stack.pop();
+                                        let children = [];
+                                        try { children = (await VFS.listFiles(dir)) || []; } catch (_) { children = []; }
+                                        for (const c of children) {
+                                            if (++scanned > LIMIT) { truncated = true; break; }
+                                            if (c.type === 'folder') { folderCount++; stack.push(c.path); }
+                                            else { fileCount++; totalBytes += (typeof c.size === 'number' ? c.size : 0); }
+                                        }
+                                    }
+                                    const exact = totalBytes.toLocaleString() + ' バイト';
+                                    const folderHtml = `
+            <div class="flex items-center gap-4">
+                <i class="${getIconForType('folder')} text-6xl w-24 text-center"></i>
+                <h3 class="text-2xl font-bold truncate">${escHtmlInfo(fileInfo.name)}</h3>
+            </div>
+            <div class="mt-6 space-y-3 text-sm">
+                <div class="flex"><p class="w-32 text-gray-400">種類</p><p>フォルダ</p></div>
+                <div class="flex"><p class="w-32 text-gray-400">サイズ</p><p>${formatBytes(totalBytes)}${totalBytes >= 1024 ? ` (${exact})` : ''}${truncated ? '（一部のみ集計）' : ''}</p></div>
+                <div class="flex"><p class="w-32 text-gray-400">内容</p><p>${fileCount.toLocaleString()} 個のファイル、${folderCount.toLocaleString()} 個のフォルダ</p></div>
+                <div class="flex"><p class="w-32 text-gray-400">場所</p><p class="font-mono">${escHtmlInfo(fileInfo.parent)}</p></div>
+                <hr class="border-white/10 my-3">
+                <div class="flex"><p class="w-32 text-gray-400">作成日時</p><p>${fileInfo.ctime ? new Date(fileInfo.ctime).toLocaleString() : '-'}</p></div>
+                <div class="flex"><p class="w-32 text-gray-400">更新日時</p><p>${fileInfo.mtime ? new Date(fileInfo.mtime).toLocaleString() : '-'}</p></div>
+            </div>
+        `;
+                                    grid.innerHTML = folderHtml;
+                                    return;
                                 }
 
                                 const infoHtml = `
@@ -56930,7 +57025,7 @@ button:hover{filter:brightness(1.08)}
             </div>
             <div class="mt-6 space-y-3 text-sm">
                 <div class="flex"><p class="w-32 text-gray-400">種類</p><p>${fileInfo.type === 'folder' ? 'フォルダ' : fileInfo.type}</p></div>
-                <div class="flex"><p class="w-32 text-gray-400">サイズ</p><p>${formatBytes(fileInfo.content?.length)}</p></div>
+                <div class="flex"><p class="w-32 text-gray-400">サイズ</p><p>${formatBytes(typeof fileInfo.size === 'number' ? fileInfo.size : fileInfo.content?.length)}</p></div>
                 <div class="flex"><p class="w-32 text-gray-400">場所</p><p class="font-mono">${fileInfo.parent}</p></div>
                 <hr class="border-white/10 my-3">
                 <div class="flex"><p class="w-32 text-gray-400">作成日時</p><p>${new Date(fileInfo.ctime).toLocaleString()}</p></div>
@@ -57465,7 +57560,7 @@ button:hover{filter:brightness(1.08)}
                                                             action: () => launchApp('html-editor', { folderPath: singleSelectedItem.path })
                                                         },
                                                         { separator: true },
-                                                        { label: 'ファイル情報', icon: 'fas fa-info-circle', action: () => renderFileInfo(singleSelectedItem.path) },
+                                                        { label: 'フォルダ情報', icon: 'fas fa-info-circle', action: () => renderFileInfo(singleSelectedItem.path, true) },
                                                         { label: 'ゴミ箱に移動', icon: 'fas fa-trash', action: deleteAction }
                                                     ];
                                                 } else {
@@ -71612,7 +71707,7 @@ body.light-mode #ac-root {
 </body>
 </html>"></textarea>
       </div>
-      <iframe id="ac-preview-frame" sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-same-origin allow-popups" class="hidden"></iframe>
+      <iframe id="ac-preview-frame" sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-popups" class="hidden"></iframe>
       <div id="ac-installed-list" class="hidden"></div>
     </div>
   </div>
@@ -71694,7 +71789,7 @@ body.light-mode #ac-root {
 
                             if (tab === 'preview') {
                                 const html = codeEditor.value;
-                                previewFrame.srcdoc = _wrapCustomAppHtml(html);
+                                previewFrame.srcdoc = _wrapCustomAppHtml(html, null);
                                 setStatus('プレビュー表示中', 'info');
                             }
                             if (tab === 'installed') {
@@ -71833,24 +71928,18 @@ body.light-mode #ac-root {
                                     const w = createWindow(wid, meta.name, `
                         <iframe id="custom-app-frame-${meta.id}"
                             style="width:100%;height:100%;border:none;"
-                            sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-same-origin allow-popups"
+                            sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-popups"
                             srcdoc=""
                         ></iframe>`, meta.windowWidth, meta.windowHeight);
                                     const wc2 = w.querySelector('.window-content');
                                     if (wc2) { wc2.style.padding = '0'; wc2.style.overflow = 'hidden'; }
                                     const iframe = w.querySelector(`#custom-app-frame-${meta.id}`);
                                     if (iframe) {
-                                        iframe.srcdoc = _wrapCustomAppHtml(meta.htmlSource);
-                                        const _bridgeHandler = (ev) => {
-                                            if (!ev.data || ev.data._riviftTarget !== meta.id) return;
-                                            if (ev.data.type === 'notify') {
-                                                createNotification(ev.data.title || meta.name, ev.data.message || '', ev.data.level || 'info');
-                                            }
-                                        };
-                                        window.addEventListener('message', _bridgeHandler);
+                                        iframe.srcdoc = _wrapCustomAppHtml(meta.htmlSource, meta.id);
+                                        const _detachBridge = _riviftAttachCustomAppBridge(iframe, meta);
                                         ProcessManager.register(wid, {
                                             onDestroy: () => {
-                                                window.removeEventListener('message', _bridgeHandler);
+                                                _detachBridge();
                                             }
                                         });
                                     }
@@ -90822,7 +90911,8 @@ RiviftConnect.connectToServer = function () {
                                 updateTaskbarAppStatus();
                                 closeAllPanels();
                                 allAppsFullscreen.classList.remove('active');
-                                return;
+                                window._launchingApps.delete(lockKey); // [FIX] ロック解除漏れ(以後そのアプリが起動できなくなる)を修正
+                                return existingWin;
                             }
                         }
                     }
@@ -91415,7 +91505,8 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                                 }
 
                                 if (fileData.type === 'folder') {
-                                    launchApp('files', { path: iconData.path });
+                                    // [FIX] ファイルアプリが起動済みでも指定フォルダを開けるよう、新規ウィンドウで起動
+                                    launchApp('files', Object.assign({ path: iconData.path }, window.__newIfRunning('files')));
                                     return;
                                 }
 
@@ -91438,9 +91529,14 @@ body.light-mode #rivift-taskbar-preview{background:var(--taskbar-preview-bg, rgb
                                     }
                                 }
                                 if (appIdToLaunch) {
-                                    launchApp(appIdToLaunch, { path: iconData.path });
+                                    const _tgtApp = apps.find(a => a.id === appIdToLaunch);
+                                    const _lp = { path: iconData.path };
+                                    if (_tgtApp && !_tgtApp.allowMultiple) Object.assign(_lp, window.__newIfRunning(appIdToLaunch));
+                                    launchApp(appIdToLaunch, _lp);
                                 } else {
-                                    createNotification('未対応のファイル', `「${iconData.name}」を開くアプリがありません。`, 'error');
+                                    // [FIX] 対応アプリが無い場合は、ファイルアプリで親フォルダを開いて選択状態にする
+                                    const _parent = iconData.path.substring(0, iconData.path.lastIndexOf('/')) || '/';
+                                    launchApp('files', Object.assign({ path: _parent, select: iconData.path }, window.__newIfRunning('files')));
                                 }
                             });
                         }
@@ -94203,13 +94299,17 @@ ${elementSummary || '画面要素情報はありません。'}`,
                                     const w = createWindow(wid, meta.name, `
                                     <iframe id="custom-app-frame-${meta.id}"
                                         style="width:100%;height:100%;border:none;"
-                                        sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-same-origin allow-popups"
+                                        sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock allow-popups"
                                         srcdoc=""
                                     ></iframe>`, meta.windowWidth || 800, meta.windowHeight || 600);
                                     const wc2 = w.querySelector('.window-content');
                                     if (wc2) { wc2.style.padding = '0'; wc2.style.overflow = 'hidden'; }
                                     const iframe = w.querySelector(`#custom-app-frame-${meta.id}`);
-                                    if (iframe) iframe.srcdoc = _wrapCustomAppHtml(meta.htmlSource);
+                                    if (iframe) {
+                                        iframe.srcdoc = _wrapCustomAppHtml(meta.htmlSource, meta.id);
+                                        const _detachBridge = _riviftAttachCustomAppBridge(iframe, meta);
+                                        ProcessManager.register(wid, { onDestroy: () => { _detachBridge(); } });
+                                    }
                                 }
                             });
                         }
