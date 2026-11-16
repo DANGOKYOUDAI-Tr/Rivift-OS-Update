@@ -43781,6 +43781,9 @@ self.addEventListener("message", function(ev) {
                     return diffs ? out.join('<br>') : '';
                 }
 
+                // エディタのGitパネルなど、他の画面からisomorphic-gitを使うための共有口
+                window.__RiviftGitCore = { loadIsomorphicGit, makeGitFs, findGitRoot, loadGitGlobalCfg };
+
                 window.__RiviftShellExt.git = async (args, ctx) => {
                     const sub = (args[0] || 'help').toLowerCase();
                     const rest = args.slice(1);
@@ -43873,7 +43876,7 @@ self.addEventListener("message", function(ev) {
                                 onProgress: (ev) => {
                                     if (signal?.aborted) throw new Error('Aborted');
                                     // フェーズが変わるたびに新しい行を追加(同じフェーズ内のカウントだけ同じ行を更新)
-                                    const cloneHtml = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)} ${ev.loaded || 0}${ev.total ? '/' + ev.total : ''}</span>`;
+                                    const cloneHtml = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)}</span> ` + (ev.total ? window.__riviftProgressBar(ev.loaded || 0, ev.total, '', 20) : `<span class="t-muted">${ev.loaded || 0}</span>`);
                                     if (!cloneLine || ev.phase !== clonePhase) { clonePhase = ev.phase; cloneLine = appendLine(cloneHtml); }
                                     else cloneLine.innerHTML = cloneHtml;
                                 },
@@ -43906,7 +43909,7 @@ self.addEventListener("message", function(ev) {
                                     await vfs.vfsWriteBytes(vfs.normPath(dir, b.path), buf);
                                     done++;
                                     const dlStep = Math.max(1, Math.ceil(blobs.length / 10));
-                                    if (done === blobs.length || done % dlStep === 0) appendLine(`<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> <span class="t-val">${done}/${blobs.length}</span> <span class="t-muted">${escHtml(b.path)}</span>`);
+                                    if (done === blobs.length || done % dlStep === 0) appendLine(`<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> ${window.__riviftProgressBar(done, blobs.length, 'files', 20)}`);
                                 }));
                             }
                             await git.init({ fs, dir, defaultBranch: defBranch });
@@ -44261,8 +44264,33 @@ self.addEventListener("message", function(ev) {
                     return json;
                 }
 
+                // コマンドライン風のテキスト進捗バー: [█████░░░░░] 50%  5/10
+                window.__riviftProgressBar = (done, total, label = '', width = 28) => {
+                    const ratio = total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
+                    const filled = Math.round(ratio * width);
+                    const pct = String(Math.floor(ratio * 100)).padStart(3, ' ').replace(/ /g, '&nbsp;');
+                    const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                    return `<span class="t-muted">[</span><span class="t-ok">${'█'.repeat(filled)}</span><span class="t-muted">${'░'.repeat(width - filled)}]</span> <span class="t-val">${pct}%</span> <span class="t-muted">${done}/${total}${label ? ' ' + esc(label) : ''}</span>`;
+                };
+
                 async function installPackagesIntoProject(projDir, specs, opts, ctx) {
-                    const { vfs, appendLine, escHtml, signal } = ctx;
+                    const { vfs, escHtml, signal } = ctx;
+                    // 履歴の行は下に積み上げ、進捗バーは常に最下行に置く
+                    const logEl = ctx.state && ctx.state.log;
+                    let barEl = null;
+                    const appendLine = (html) => {
+                        const d = ctx.appendLine(html);
+                        if (barEl && logEl && barEl.parentNode === logEl) logEl.appendChild(barEl);
+                        return d;
+                    };
+                    const setBar = (done, total) => {
+                        const html = window.__riviftProgressBar(done, total, 'packages');
+                        if (!barEl) barEl = ctx.appendLine(html);
+                        else {
+                            barEl.innerHTML = html;
+                            if (logEl && barEl.parentNode === logEl) logEl.appendChild(barEl);
+                        }
+                    };
                     const pkgJsonPath = vfs.normPath(projDir, 'package.json');
                     let pkgJson = { name: vfs.baseNameOf(projDir) || 'rivift-app', version: '1.0.0', type: 'module', scripts: {}, dependencies: {} };
                     try { pkgJson = JSON.parse(await vfs.vfsReadText(pkgJsonPath)); } catch {}
@@ -44316,6 +44344,7 @@ self.addEventListener("message", function(ev) {
                     const entries = Array.from(resolved.entries());
                     let idx = 0;
                     const t0 = Date.now();
+                    setBar(0, entries.length);
                     for (const [pkgName, info] of entries) {
                         if (signal?.aborted) throw new Error('Aborted');
                         idx++;
@@ -44338,6 +44367,7 @@ self.addEventListener("message", function(ev) {
                             ));
                         }
                         appendLine(`<span class="t-ok">  ✓</span> <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span> <span class="t-muted">(${keepFiles.length} files)</span>`);
+                        setBar(idx, entries.length);
                         lockJson.packages['node_modules/' + pkgName] = {
                             version: info.version,
                             resolved: tarballUrl,
@@ -46107,7 +46137,7 @@ self.addEventListener("message", function(ev) {
                                 if (signal?.aborted) throw new Error('Aborted');
                                 upCount++;
                                 const upStep = Math.max(1, Math.ceil(reqHashes.length / 10));
-                                if (upCount === 1 || upCount === reqHashes.length || upCount % upStep === 0) appendLine(`<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> uploading ${upCount}/${reqHashes.length}...`);
+                                if (upCount === 1 || upCount === reqHashes.length || upCount % upStep === 0) appendLine(`<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> uploading ${window.__riviftProgressBar(upCount, reqHashes.length, 'files', 20)}`);
                                 const upRes = await fetch(`${pop.uploadUrl}/${h}`, {
                                     method: 'POST',
                                     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
@@ -46835,10 +46865,18 @@ self.addEventListener("message", function(ev) {
                                                 <option value="tonight">今夜（深夜2時）</option>
                                             </select>
                                         </div>
+                                        <label style="display:flex;align-items:center;justify-content:space-between;font-size:13px;margin-top:14px;cursor:pointer;">
+                                            <span>起動時と定期的に自動でアップデートを確認</span>
+                                            <input type="checkbox" id="ms-auto-update" ${localStorage.getItem('riviftAutoUpdateCheck') !== 'off' ? 'checked' : ''}>
+                                        </label>
                                         <button class="ms-btn ms-btn-primary" id="ms-check-update" style="margin-top:16px;">アップデートを確認</button>
                                         <button class="ms-btn ms-btn-primary" id="ms-apply-update" style="margin-top:8px;display:none;">アップデートを適用</button>`;
 
                                             let releaseInfo = null;
+                                            detailBody.querySelector('#ms-auto-update')?.addEventListener('change', (e) => {
+                                                try { localStorage.setItem('riviftAutoUpdateCheck', e.target.checked ? 'on' : 'off'); } catch (_) { }
+                                                if (e.target.checked && typeof window.riviftBackgroundUpdateCheck === 'function') window.riviftBackgroundUpdateCheck({ force: true });
+                                            });
                                             detailBody.querySelector('#ms-check-update').addEventListener('click', async () => {
                                                 detailBody.querySelector('#ms-update-title').textContent = '確認中...';
                                                 detailBody.querySelector('#ms-update-sub').textContent = '';
@@ -49073,6 +49111,10 @@ self.addEventListener("message", function(ev) {
                                         <i class="ti ti-clock"></i> <span id="update-scheduled-text"></span>
                                         <button id="update-cancel-scheduled" class="text-xs underline ml-2" style="opacity:.8;">キャンセル</button>
                                     </div>
+                                    <label class="flex items-center justify-between text-sm mt-4" style="cursor:pointer;">
+                                        <span>起動時と定期的に自動でアップデートを確認</span>
+                                        <input type="checkbox" id="auto-update-check" ${localStorage.getItem('riviftAutoUpdateCheck') !== 'off' ? 'checked' : ''}>
+                                    </label>
                                     <hr class="my-4" style="border-color: rgba(255,255,255,0.1);">
                                     <div class="mt-3">
                                         <p class="text-xs opacity-60 mb-2">アップデートキャッシュの初期化（問題発生時）:</p>
@@ -49092,6 +49134,10 @@ self.addEventListener("message", function(ev) {
                                 const scheduledText = mainContent.querySelector('#update-scheduled-text');
                                 const cancelScheduledBtn = mainContent.querySelector('#update-cancel-scheduled');
                                 const resetUpdateCacheBtn = mainContent.querySelector('#reset-update-cache-btn');
+                                mainContent.querySelector('#auto-update-check')?.addEventListener('change', (e) => {
+                                    try { localStorage.setItem('riviftAutoUpdateCheck', e.target.checked ? 'on' : 'off'); } catch (_) { }
+                                    if (e.target.checked && typeof window.riviftBackgroundUpdateCheck === 'function') window.riviftBackgroundUpdateCheck({ force: true });
+                                });
                                 if (resetUpdateCacheBtn) {
                                     resetUpdateCacheBtn.addEventListener('click', async () => {
                                         if (confirm('ブラウザに保存されたアップデート用キャッシュを削除し、最新の物理ファイルを直接読み込みますか？')) {
@@ -52420,7 +52466,11 @@ mark.br-find-hit.cur{background:#f28b82}
                                 return;
                             }
 
-                            const desiredMode = getDomainMode(url, tab);
+                            const desiredMode = navOpts.modeOverride || getDomainMode(url, tab);
+                            // 検索結果ページを「直接 iframe」で開くと、結果リンクのクリックを横取りできず
+                            // (target=_blank がサンドボックスでブロックされる等)ページに移動できない。
+                            // 検索結果はプロキシ表示(リンクを拾うブリッジ付き)で読み込み、失敗した時だけ直接表示に戻す。
+                            const serpViaProxy = desiredMode === 'direct' && isSerpUrl(url) && !navOpts._directSerp;
                             const embedType = getEmbedType(url);
                             const embedUrl = (desiredMode === 'auto' || desiredMode === 'direct') ? getEmbedUrl(url, embedType) : null;
 
@@ -52457,7 +52507,7 @@ mark.br-find-hit.cur{background:#f28b82}
                             }
                             if (isStaleNav()) return;
 
-                            if (desiredMode === 'direct') {
+                            if (desiredMode === 'direct' && !serpViaProxy) {
                                 tab.connType = 'embed';
                                 tab.proxyName = '直接 iframe';
                                 hideAllInternalPages();
@@ -52636,6 +52686,10 @@ mark.br-find-hit.cur{background:#f28b82}
                             } catch (_) { }
                             if (isStaleNav()) return;
 
+                            if (serpViaProxy) {
+                                // プロキシでは取得できなかった → 従来どおり直接 iframe で表示
+                                return navigateTo(input, tab, Object.assign({}, navOpts, { _directSerp: true, skipGlobalHistory: true }));
+                            }
                             tab.connType = 'blocked';
                             tab.proxyName = '';
                             tab.loading = false;
@@ -54367,12 +54421,14 @@ button:hover{filter:brightness(1.08)}
                             if (!sender) return;
                             if (e.data.type === 'br-navigate') {
                                 if (sender.id !== activeTabId) activateTab(sender.id);
-                                navigateTo(e.data.url, sender);
+                                // 検索結果から、iframe埋め込みを拒否する既知のサイトへ移動する時は、そのリンクだけ自動モード(プロキシ/リーダー)で開く
+                                const _navFromSerp = isSerpUrl(sender.lastRawUrl || sender.url) || isSerpUrl(sender.url);
+                                navigateTo(e.data.url, sender, (_navFromSerp && IFRAME_BLOCKED.test(e.data.url)) ? { modeOverride: 'auto' } : {});
                             } else if (e.data.type === 'br-newtab') {
                                 const _senderIsSerp = isSerpUrl(sender.lastRawUrl || sender.url);
                                 // 検索結果ページを自動モードで開いているだけの場合は、開いた先にモードを引き継がない（デフォルトの直接 iframe を使う）
                                 const inheritedMode = _senderIsSerp ? null : (sender.forceMode || ((sender.connType === 'proxy' || sender.connType === 'reader') ? 'auto' : null));
-                                createTab(e.data.url, true, { index: tabs.indexOf(sender) + 1, forceMode: inheritedMode });
+                                createTab(e.data.url, true, { index: tabs.indexOf(sender) + 1, forceMode: inheritedMode || ((_senderIsSerp && IFRAME_BLOCKED.test(e.data.url)) ? 'auto' : null) });
                             } else if (e.data.type === 'br-hover' && sender.id === activeTabId) {
                                 if (e.data.url) { linkPreviewEl.textContent = e.data.url; linkPreviewEl.classList.add('visible'); }
                                 else linkPreviewEl.classList.remove('visible');
@@ -58286,7 +58342,19 @@ body.aero-enabled.light-mode .term-output::-webkit-scrollbar-thumb { background:
   </div>
 </div>`;
 
-                        const commandWindow = createWindow(__instId('command'), t('app.command.windowTitle'), content, 860, 540);
+                        // mountInto が渡された場合は、別ウィンドウを作らずその要素の中にシェルを埋め込む(コードエディタの下部ドック用)
+                        const __mountHost = (typeof HTMLElement !== 'undefined' && launchParams.mountInto instanceof HTMLElement) ? launchParams.mountInto : null;
+                        const commandWindow = (() => {
+                            if (!__mountHost) return createWindow(__instId('command'), t('app.command.windowTitle'), content, 860, 540);
+                            __mountHost.innerHTML = content;
+                            // exit / Ctrl+D 用の疑似 close ボタン
+                            const closeBtn = document.createElement('button');
+                            closeBtn.className = 'close';
+                            closeBtn.style.display = 'none';
+                            closeBtn.addEventListener('click', () => { try { launchParams.onExit && launchParams.onExit(); } catch (_) {} });
+                            __mountHost.appendChild(closeBtn);
+                            return __mountHost;
+                        })();
                         const termRoot = commandWindow.querySelector('#term-root');
                         const termCompletion = commandWindow.querySelector('#term-completion');
                         const winTitleEl = commandWindow.querySelector('.window-header > span');
@@ -61232,6 +61300,26 @@ body.aero-enabled.light-mode .term-output::-webkit-scrollbar-thumb { background:
                             }
                             if (launchParams?.cmd) await executeLine(state, launchParams.cmd);
                         })();
+                        if (__mountHost) {
+                            // 埋め込みモード: ProcessManager には登録せず、制御用APIを呼び出し元に渡す
+                            const api = {
+                                state, vfs: vfsCtx, termEnv,
+                                run: async (cmd, o = {}) => {
+                                    if (o.echo) appendLine(state, `<span class="t-path">${escHtml(formatDisplayCwd(state.cwd))}</span> <span class="t-ok">$</span> <span class="t-cmd">${escHtml(cmd)}</span>`);
+                                    try { await executeLine(state, cmd); } finally { try { updatePromptMeta(state); } catch (_) {} }
+                                },
+                                focus: () => { try { state.input.focus(); } catch (_) {} },
+                                getCwd: () => state.cwd,
+                                setCwd: (p) => { state.cwd = p; state.prompt.textContent = formatDisplayCwd(p); try { updatePromptMeta(state); } catch (_) {} },
+                                dispose: () => {
+                                    try { if (state.abortController) state.abortController.abort(); } catch (_) {}
+                                    try { state.repl?.terminate?.(); } catch (_) {}
+                                    if (state.busyTimer) clearTimeout(state.busyTimer);
+                                    __mountHost.innerHTML = '';
+                                },
+                            };
+                            try { launchParams.onReady && launchParams.onReady(api); } catch (_) {}
+                        } else {
                         ProcessManager.register(commandWindow.id, {
                             onResume: () => state.input.focus(),
                             onDestroy: () => {
@@ -61240,6 +61328,7 @@ body.aero-enabled.light-mode .term-output::-webkit-scrollbar-thumb { background:
                                 if (state.busyTimer) clearTimeout(state.busyTimer);
                             },
                         });
+                        }
                     }
                 },
                 {
@@ -67118,6 +67207,24 @@ body.light-mode #rhe-root {
 /* 下部統合ターミナル＆コマンドライン */
 #rhe-bottom-dock { height:205px; min-height:110px; max-height:60%; border-top:1px solid var(--rhe-border); background:var(--rhe-bg); display:none; flex-direction:column; flex-shrink:0; }
 #rhe-bottom-dock.active { display:flex; }
+#rhe-shell-host { flex:1; min-height:0; display:none; flex-direction:column; }
+#rhe-shell-host > #term-root { flex:1; min-height:0; height:auto; }
+.rhe-git { padding:8px; display:flex; flex-direction:column; gap:8px; font-size:12px; }
+.rhe-git select, .rhe-git textarea { background:var(--rhe-editor); border:1px solid var(--rhe-border); color:var(--rhe-tx); border-radius:4px; font-size:12px; font-family:inherit; }
+.rhe-git-row { display:flex; align-items:center; gap:6px; height:24px; padding:0 4px; border-radius:4px; cursor:pointer; }
+.rhe-git-row:hover { background:var(--rhe-hv); }
+.rhe-git-acts { display:none; gap:2px; margin-left:auto; flex-shrink:0; }
+.rhe-git-row:hover .rhe-git-acts { display:flex; }
+.rhe-git-badge { width:14px; text-align:center; font-weight:700; font-size:11px; font-family:'DM Mono',monospace; flex-shrink:0; }
+.rhe-git-badge.b-M { color:#e2c08d; } .rhe-git-badge.b-A, .rhe-git-badge.b-U { color:#73c991; } .rhe-git-badge.b-D { color:#f87171; }
+.rhe-git-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.rhe-git-dir { opacity:.5; font-size:11px; margin-left:4px; }
+.rhe-git-sec { display:flex; align-items:center; justify-content:space-between; font-weight:600; font-size:11px; color:var(--rhe-tx2); padding:2px 2px; }
+.rhe-git-log { display:flex; gap:6px; align-items:baseline; padding:2px 4px; font-size:11.5px; }
+.rhe-git-log .h { color:#38bdf8; font-family:'DM Mono',monospace; flex-shrink:0; }
+.rhe-git-log .m { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+.rhe-git-log .t { opacity:.5; font-size:10.5px; flex-shrink:0; }
+.rhe-git-empty { padding:14px 8px; text-align:center; color:var(--rhe-tx2); line-height:1.7; }
 #rhe-dock-header { height:28px; padding:0 10px; background:var(--rhe-bar); border-bottom:1px solid var(--rhe-border); display:flex; align-items:center; gap:12px; flex-shrink:0; }
 .rhe-dock-tab { font-size:11px; font-weight:600; color:var(--rhe-tx2); background:none; border:none; height:100%; padding:0 4px; cursor:pointer; position:relative; display:inline-flex; align-items:center; gap:5px; }
 .rhe-dock-tab:hover { color:var(--rhe-tx); }
@@ -67268,6 +67375,7 @@ body.light-mode #rhe-root {
       <button class="rhe-act-btn active" data-panel="explorer" title="エクスプローラー (Ctrl+B)"><i class="fas fa-folder-tree"></i></button>
       <button class="rhe-act-btn" data-panel="search" title="ワークスペース検索"><i class="fas fa-magnifying-glass"></i></button>
       <button class="rhe-act-btn" data-panel="outline" title="アウトライン＆スニペット"><i class="fas fa-code-branch"></i></button>
+      <button class="rhe-act-btn" data-panel="git" title="ソース管理 (Git)"><i class="fas fa-code-commit"></i></button>
       <button class="rhe-act-btn" data-panel="ai" title="AI アシスタント"><i class="fas fa-robot"></i></button>
       <div style="flex:1"></div>
       <button class="rhe-act-btn" data-panel="settings" title="エディタ設定"><i class="fas fa-sliders"></i></button>
@@ -67360,13 +67468,16 @@ body.light-mode #rhe-root {
       <div id="rhe-bottom-dock">
         <div id="rhe-dock-header">
           <button class="rhe-dock-tab active" data-dock="term"><i class="fas fa-terminal"></i> ターミナル / 出力</button>
+          <button class="rhe-dock-tab" data-dock="shell" title="コマンドアプリと同じシェル"><i class="fas fa-square-terminal"></i> シェル</button>
           <button class="rhe-dock-tab" data-dock="problems"><i class="fas fa-triangle-exclamation"></i> 診断 / 問題 <span id="rhe-prob-badge" style="background:rgba(255,255,255,0.12);padding:0 5px;border-radius:8px;font-size:10px;">0</span></button>
           <div style="flex:1"></div>
           <span id="rhe-dock-status" style="font-size:11px;color:var(--rhe-tx2);font-family:'DM Mono',monospace;">待機中</span>
+          <button class="rhe-icon-btn" id="rhe-shell-cd" title="ワークスペースへ移動 (cd)" style="display:none;"><i class="fas fa-house"></i></button>
           <button class="rhe-icon-btn" id="rhe-dock-clear" title="出力をクリア"><i class="fas fa-ban"></i></button>
           <button class="rhe-icon-btn" id="rhe-dock-close" title="パネルを閉じる"><i class="fas fa-xmark"></i></button>
         </div>
         <div id="rhe-dock-body">
+          <div id="rhe-shell-host"></div>
           <div id="rhe-term-out"></div>
           <div id="rhe-problems-list" style="display:none;flex:1;overflow-y:auto;padding:6px 10px;font-size:12px;"></div>
           <div id="rhe-stdin-row">
@@ -67400,6 +67511,7 @@ body.light-mode #rhe-root {
     <span class="rhe-status-item" id="rhe-st-pos" title="クリックで行番号ジャンプ (Ctrl+G)">行 1, 列 1</span>
     <span class="rhe-status-item" id="rhe-st-spaces" title="インデント幅">スペース: 4</span>
     <span class="rhe-status-item" id="rhe-st-enc">UTF-8</span>
+    <span class="rhe-status-item" id="rhe-st-git" title="ソース管理を開く" style="display:none;cursor:pointer;"><i class="fas fa-code-branch"></i> <span id="rhe-st-git-text"></span></span>
     <div style="flex:1"></div>
     <span class="rhe-status-item" id="rhe-st-smooth" title="ヌルヌル動くスムーズカーソル有効"><i class="fas fa-wand-sparkles"></i> Smooth Caret</span>
     <span class="rhe-status-item" id="rhe-st-ai"><i class="fas fa-robot"></i> AI Ready</span>
@@ -67753,6 +67865,9 @@ body.light-mode #rhe-root {
                                     </div>
                                 `;
                                 setupAIChat();
+                            } else if (panel === 'git') {
+                                if (titleEl) titleEl.textContent = 'ソース管理 (Git)';
+                                renderGitPanel(sc);
                             } else if (panel === 'settings') {
                                 if (titleEl) titleEl.textContent = 'エディタ設定';
                                 sc.innerHTML = `
@@ -67815,6 +67930,319 @@ body.light-mode #rhe-root {
                         editorWindow.querySelectorAll('.rhe-act-btn').forEach(btn => {
                             btn.addEventListener('click', () => switchSidePanel(btn.dataset.panel));
                         });
+
+                        // ===================== 統合シェル (コマンドアプリと同じシェルを下部ドックに埋め込む) =====================
+                        let shellApi = null, shellPromise = null;
+                        function ensureShell() {
+                            if (shellPromise) return shellPromise;
+                            shellPromise = new Promise((resolve, reject) => {
+                                const host = rheSt('rhe-shell-host');
+                                const mount = window._mountCommandTerminal;
+                                if (!host || typeof mount !== 'function') return reject(new Error('シェルを起動できません'));
+                                try {
+                                    mount({
+                                        mountInto: host,
+                                        cwd: currentWorkspacePath || '/',
+                                        onReady: (api) => { shellApi = api; resolve(api); },
+                                        onExit: () => {
+                                            try { if (shellApi) shellApi.dispose(); } catch (_) {}
+                                            shellApi = null; shellPromise = null;
+                                            editorWindow.querySelector('.rhe-dock-tab[data-dock="term"]')?.click();
+                                        },
+                                    });
+                                } catch (e) { reject(e); }
+                            }).catch(e => { shellPromise = null; throw e; });
+                            return shellPromise;
+                        }
+                        function showShellDock() {
+                            rheSt('rhe-bottom-dock')?.classList.add('active');
+                            rheSt('rhe-toggle-dock')?.classList.add('active');
+                            editorWindow.querySelector('.rhe-dock-tab[data-dock="shell"]')?.click();
+                        }
+
+                        // ===================== Git ソース管理パネル =====================
+                        const gitState = { sc: null, loaded: false, noRepo: false, dir: null, branch: '', branches: [], staged: [], unstaged: [], log: [], msgDraft: '', busy: false, error: '', logOpen: true, quietUntil: 0, refreshing: false };
+                        let gitRefreshTimer = null;
+                        const gEsc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+                        const gRelTime = (ts) => {
+                            const d = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+                            if (d < 60) return 'たった今';
+                            if (d < 3600) return Math.floor(d / 60) + '分前';
+                            if (d < 86400) return Math.floor(d / 3600) + '時間前';
+                            if (d < 2592000) return Math.floor(d / 86400) + '日前';
+                            return new Date(ts * 1000).toLocaleDateString();
+                        };
+
+                        async function gitCtx() {
+                            const api = await ensureShell();
+                            const core = window.__RiviftGitCore;
+                            if (!core) throw new Error('Git モジュールが利用できません');
+                            const { git } = await core.loadIsomorphicGit();
+                            const fs = core.makeGitFs(api.vfs);
+                            const activeT = openTabs.find(tb => tb.id === activeTabId);
+                            const activeDir = activeT && activeT.path ? (activeT.path.substring(0, activeT.path.lastIndexOf('/')) || '/') : null;
+                            const base = currentWorkspacePath || activeDir || '/';
+                            const dir = await core.findGitRoot(base, api.vfs);
+                            return { api, core, git, fs, dir, base };
+                        }
+                        const gitAuthor = (api) => {
+                            const c = window.__RiviftGitCore.loadGitGlobalCfg();
+                            const env = api.termEnv || {};
+                            return { name: c['user.name'] || env.GIT_AUTHOR_NAME || env.USER || 'Rivift User', email: c['user.email'] || env.GIT_AUTHOR_EMAIL || 'user@rivift.local' };
+                        };
+
+                        function scheduleGitRefresh() {
+                            if (gitState.busy || gitState.refreshing || Date.now() < gitState.quietUntil) return;
+                            clearTimeout(gitRefreshTimer);
+                            gitRefreshTimer = setTimeout(() => { if (currentSidePanel === 'git') gitRefresh(); }, 600);
+                        }
+
+                        async function gitRefresh() {
+                            if (gitState.refreshing) return;
+                            gitState.refreshing = true;
+                            try {
+                                const g = await gitCtx();
+                                gitState.error = '';
+                                gitState.loaded = true;
+                                if (!g.dir) {
+                                    gitState.noRepo = true; gitState.dir = null;
+                                    gitState.staged = []; gitState.unstaged = []; gitState.log = []; gitState.branches = [];
+                                    const stEl = rheSt('rhe-st-git'); if (stEl) stEl.style.display = 'none';
+                                } else {
+                                    const { git, fs, dir } = g;
+                                    gitState.noRepo = false; gitState.dir = dir;
+                                    gitState.branch = (await git.currentBranch({ fs, dir, fullname: false }).catch(() => null)) || 'HEAD';
+                                    gitState.branches = await git.listBranches({ fs, dir }).catch(() => []);
+                                    const matrix = await git.statusMatrix({ fs, dir, filter: (f) => !/(^|\/)node_modules(\/|$)/.test(f) });
+                                    const staged = [], unstaged = [];
+                                    for (const [fp, head, workdir, stage] of matrix) {
+                                        if (head === 0 && workdir === 2 && stage === 0) { unstaged.push({ path: fp, code: 'U', kind: 'untracked' }); continue; }
+                                        if (stage !== head) staged.push({ path: fp, code: head === 0 ? 'A' : (stage === 0 ? 'D' : 'M'), kind: 'staged' });
+                                        if (workdir !== stage) unstaged.push({ path: fp, code: workdir === 0 ? 'D' : 'M', kind: 'unstaged' });
+                                    }
+                                    const byPath = (a, b) => a.path.localeCompare(b.path);
+                                    gitState.staged = staged.sort(byPath);
+                                    gitState.unstaged = unstaged.sort(byPath);
+                                    gitState.log = await git.log({ fs, dir, depth: 15 }).catch(() => []);
+                                    const stEl = rheSt('rhe-st-git'), stTx = rheSt('rhe-st-git-text');
+                                    if (stEl && stTx) {
+                                        const n = staged.length + unstaged.length;
+                                        stTx.textContent = gitState.branch + (n ? ` ●${n}` : '');
+                                        stEl.style.display = '';
+                                    }
+                                }
+                            } catch (e) {
+                                gitState.error = e.message || String(e);
+                            } finally {
+                                gitState.refreshing = false;
+                                gitState.quietUntil = Date.now() + 1500; // 読み取り中の .git/index 更新で再描画ループにならないように
+                            }
+                            renderGitPanelBody();
+                        }
+
+                        function renderGitPanel(sc) {
+                            gitState.sc = sc;
+                            renderGitPanelBody();
+                            gitRefresh();
+                        }
+
+                        function renderGitPanelBody() {
+                            const sc = gitState.sc;
+                            if (!sc || !sc.isConnected || currentSidePanel !== 'git') return;
+                            const ta = sc.querySelector('#rhe-git-msg');
+                            if (ta) gitState.msgDraft = ta.value;
+                            const dis = gitState.busy ? 'disabled' : '';
+                            const btn = (act, icon, title, extra = '') => `<button class="rhe-icon-btn" data-act="${act}" title="${title}" ${dis} ${extra}><i class="fas fa-${icon}"></i></button>`;
+                            let html = '<div class="rhe-git">';
+                            if (!gitState.loaded && !gitState.error) {
+                                html += '<div class="rhe-git-empty">読み込み中...<br><span style="font-size:11px;opacity:.7;">初回は isomorphic-git を読み込みます</span></div>';
+                            } else if (gitState.error) {
+                                html += `<div class="rhe-git-empty" style="color:#f87171;">${gEsc(gitState.error)}</div><div style="text-align:center;">${btn('refresh', 'rotate-right', '再読み込み')}</div>`;
+                            } else if (gitState.noRepo) {
+                                html += `<div class="rhe-git-empty">${currentWorkspacePath ? 'このフォルダは Git リポジトリではありません。' : 'エクスプローラーでフォルダを開いてください。'}</div>`;
+                                if (currentWorkspacePath) html += `<button class="rhe-tb-btn primary" data-act="init" ${dis} style="justify-content:center;">リポジトリを初期化</button>`;
+                            } else {
+                                const branches = gitState.branches.includes(gitState.branch) ? gitState.branches : [gitState.branch, ...gitState.branches];
+                                html += `<div style="display:flex;align-items:center;gap:4px;">
+                                    <select id="rhe-git-branch" ${dis} style="flex:1;min-width:0;padding:3px 4px;">${branches.map(b => `<option value="${gEsc(b)}" ${b === gitState.branch ? 'selected' : ''}>${gEsc(b)}</option>`).join('')}</select>
+                                    ${btn('newBranch', 'plus', '新しいブランチ')}${btn('fetch', 'cloud-arrow-down', 'fetch')}${btn('pull', 'arrow-down', 'pull')}${btn('push', 'arrow-up', 'push')}${btn('refresh', 'rotate-right', '更新')}
+                                </div>
+                                <div style="display:flex;flex-direction:column;gap:4px;">
+                                    <textarea id="rhe-git-msg" rows="3" placeholder="コミットメッセージ (Ctrl+Enter でコミット)" style="width:100%;padding:6px 8px;resize:vertical;">${gEsc(gitState.msgDraft)}</textarea>
+                                    <button class="rhe-tb-btn primary" data-act="commit" ${dis} style="justify-content:center;"><i class="fas fa-check"></i> コミット${gitState.staged.length ? ` (${gitState.staged.length})` : ''}</button>
+                                </div>`;
+                                const row = (f) => {
+                                    const name = f.path.split('/').pop();
+                                    const d = f.path.includes('/') ? f.path.substring(0, f.path.lastIndexOf('/')) : '';
+                                    const acts = f.kind === 'staged'
+                                        ? btn('unstage', 'minus', 'アンステージ', `data-path="${gEsc(f.path)}"`)
+                                        : btn('discard', f.kind === 'untracked' ? 'trash' : 'rotate-left', f.kind === 'untracked' ? '削除' : '変更を破棄', `data-path="${gEsc(f.path)}" data-kind="${f.kind}"`) + btn('stage', 'plus', 'ステージ', `data-path="${gEsc(f.path)}"`);
+                                    return `<div class="rhe-git-row" data-path="${gEsc(f.path)}" data-kind="${f.kind}" title="${gEsc(f.path)}"><span class="rhe-git-badge b-${f.code}">${f.code}</span><span class="rhe-git-name">${gEsc(name)}<span class="rhe-git-dir">${gEsc(d)}</span></span><span class="rhe-git-acts">${acts}</span></div>`;
+                                };
+                                html += `<div><div class="rhe-git-sec"><span>ステージ済みの変更 (${gitState.staged.length})</span>${gitState.staged.length ? btn('unstageAll', 'minus', 'すべてアンステージ') : ''}</div>${gitState.staged.map(row).join('') || '<div style="opacity:.5;padding:2px 6px;">なし</div>'}</div>`;
+                                html += `<div><div class="rhe-git-sec"><span>変更 (${gitState.unstaged.length})</span>${gitState.unstaged.length ? btn('stageAll', 'plus', 'すべてステージ') : ''}</div>${gitState.unstaged.map(row).join('') || '<div style="opacity:.5;padding:2px 6px;">なし</div>'}</div>`;
+                                html += `<div><div class="rhe-git-sec" data-act="toggleLog" style="cursor:pointer;"><span><i class="fas fa-chevron-${gitState.logOpen ? 'down' : 'right'}" style="font-size:9px;"></i> 履歴</span></div>${gitState.logOpen ? (gitState.log.map(c => `<div class="rhe-git-log" title="${gEsc(c.commit.message)}"><span class="h">${c.oid.slice(0, 7)}</span><span class="m">${gEsc(c.commit.message.split('\n')[0])}</span><span class="t">${gEsc(gRelTime(c.commit.author.timestamp))}</span></div>`).join('') || '<div style="opacity:.5;padding:2px 6px;">コミットはまだありません</div>') : ''}</div>`;
+                            }
+                            html += '</div>';
+                            sc.innerHTML = html;
+                            sc.onclick = async (e) => {
+                                const actEl = e.target.closest('[data-act]');
+                                if (actEl) {
+                                    if (actEl.disabled) return;
+                                    e.stopPropagation();
+                                    await gitAction(actEl.dataset.act, actEl.dataset.path, actEl.dataset.kind);
+                                    return;
+                                }
+                                const rowEl = e.target.closest('.rhe-git-row');
+                                if (rowEl) openGitDiff(rowEl.dataset.path);
+                            };
+                            sc.onchange = (e) => { if (e.target.id === 'rhe-git-branch') gitAction('checkout', e.target.value); };
+                            sc.onkeydown = (e) => {
+                                if (e.target.id === 'rhe-git-msg' && (e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); gitAction('commit'); }
+                            };
+                        }
+
+                        async function reloadOpenTabsFromDisk(onlyPaths) {
+                            for (const tb of openTabs) {
+                                if (!tb.path || tb.isUntitled || !tb.model || tb.dirty) continue;
+                                if (onlyPaths && !onlyPaths.includes(tb.path)) continue;
+                                try {
+                                    const fd = await readFileWithWorker(tb.path);
+                                    if (!fd || typeof fd.content !== 'string') continue;
+                                    const text = fd.content.startsWith('data:') ? await (await fetch(fd.content)).text() : fd.content;
+                                    if (text !== tb.model.getValue()) { tb.model.setValue(text); tb.savedContent = text; tb.dirty = false; }
+                                } catch (_) {}
+                            }
+                            renderTabsBar();
+                        }
+
+                        async function gitAction(act, path, kind) {
+                            if (gitState.busy) return;
+                            if (act === 'toggleLog') { gitState.logOpen = !gitState.logOpen; renderGitPanelBody(); return; }
+                            const ta = gitState.sc && gitState.sc.querySelector('#rhe-git-msg');
+                            if (ta) gitState.msgDraft = ta.value;
+                            gitState.busy = true;
+                            renderGitPanelBody();
+                            try {
+                                const g = await gitCtx();
+                                const { git, fs, api } = g;
+                                const dir = g.dir;
+                                if (act === 'init') {
+                                    if (!currentWorkspacePath) throw new Error('先にフォルダを開いてください');
+                                    await git.init({ fs, dir: currentWorkspacePath, defaultBranch: 'main' });
+                                    createNotification('Git', 'リポジトリを初期化しました。', 'info');
+                                } else if (!dir) {
+                                    throw new Error('Git リポジトリが見つかりません');
+                                } else if (act === 'stage') {
+                                    const f = gitState.unstaged.find(x => x.path === path);
+                                    if (f && f.code === 'D') await git.remove({ fs, dir, filepath: path }); else await git.add({ fs, dir, filepath: path });
+                                } else if (act === 'unstage') {
+                                    await git.resetIndex({ fs, dir, filepath: path });
+                                } else if (act === 'stageAll') {
+                                    for (const f of gitState.unstaged) {
+                                        if (f.code === 'D') await git.remove({ fs, dir, filepath: f.path }); else await git.add({ fs, dir, filepath: f.path });
+                                    }
+                                } else if (act === 'unstageAll') {
+                                    for (const f of gitState.staged) await git.resetIndex({ fs, dir, filepath: f.path });
+                                } else if (act === 'discard') {
+                                    const ok = await showMessageBox(kind === 'untracked' ? 'ファイルを削除' : '変更を破棄', `「${path}」${kind === 'untracked' ? 'を削除します' : 'の変更を破棄します'}。元に戻せません。よろしいですか？`, { showCancel: true });
+                                    if (ok) {
+                                        const abs = api.vfs.normPath(dir, path);
+                                        if (kind === 'untracked') await api.vfs.vfsRmRf(abs);
+                                        else await git.checkout({ fs, dir, filepaths: [path], force: true });
+                                        await reloadOpenTabsFromDisk([abs]);
+                                    }
+                                } else if (act === 'commit') {
+                                    const msg = (gitState.msgDraft || '').trim();
+                                    if (!msg) throw new Error('コミットメッセージを入力してください');
+                                    if (!gitState.staged.length) {
+                                        if (!gitState.unstaged.length) throw new Error('コミットする変更がありません');
+                                        const all = await showMessageBox('すべてコミット', 'ステージ済みの変更がありません。すべての変更をステージしてコミットしますか？', { showCancel: true });
+                                        if (!all) throw new Error('キャンセルしました');
+                                        for (const f of gitState.unstaged) {
+                                            if (f.code === 'D') await git.remove({ fs, dir, filepath: f.path }); else await git.add({ fs, dir, filepath: f.path });
+                                        }
+                                    }
+                                    const sha = await git.commit({ fs, dir, author: gitAuthor(api), message: msg });
+                                    gitState.msgDraft = '';
+                                    createNotification('コミット完了', `${sha.slice(0, 7)} ${msg.split('\n')[0]}`, 'info');
+                                } else if (act === 'checkout') {
+                                    await git.checkout({ fs, dir, ref: path });
+                                    await reloadOpenTabsFromDisk();
+                                } else if (act === 'newBranch') {
+                                    const name = await showMessageBox('新しいブランチ', '新しいブランチ名を入力してください', { showCancel: true, input: { value: '' } });
+                                    if (name && String(name).trim()) await git.branch({ fs, dir, ref: String(name).trim(), checkout: true });
+                                } else if (act === 'fetch' || act === 'pull' || act === 'push') {
+                                    // 進捗バーなどはシェルの出力として見せる
+                                    api.setCwd(dir);
+                                    showShellDock();
+                                    await api.run(`git ${act}`, { echo: true });
+                                    if (act === 'pull') await reloadOpenTabsFromDisk();
+                                }
+                            } catch (e) {
+                                const m = e && e.message ? e.message : String(e);
+                                if (m !== 'キャンセルしました') createNotification('Git エラー', m, 'error');
+                            } finally {
+                                gitState.busy = false;
+                            }
+                            gitRefresh();
+                        }
+
+                        async function openGitDiff(path) {
+                            try {
+                                const g = await gitCtx();
+                                const { git, fs, dir, api } = g;
+                                if (!dir) return;
+                                let oldText = '';
+                                const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' }).catch(() => null);
+                                if (headOid) {
+                                    try { const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath: path }); oldText = new TextDecoder().decode(blob); } catch (_) {}
+                                }
+                                let newText = '';
+                                const abs = api.vfs.normPath(dir, path);
+                                try { newText = await api.vfs.vfsReadText(abs); } catch (_) {}
+                                showGitDiffOverlay(path, abs, oldText, newText);
+                            } catch (e) {
+                                createNotification('Git エラー', e.message || String(e), 'error');
+                            }
+                        }
+
+                        function showGitDiffOverlay(path, absPath, oldText, newText) {
+                            const root = rheSt('rhe-root');
+                            if (!root || typeof monaco === 'undefined') return;
+                            root.querySelector('#rhe-git-diff-overlay')?.remove();
+                            if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
+                            const ov = document.createElement('div');
+                            ov.id = 'rhe-git-diff-overlay';
+                            ov.style.cssText = 'position:absolute;inset:0;z-index:9990;display:flex;flex-direction:column;background:var(--rhe-editor);';
+                            ov.innerHTML = `<div style="height:32px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--rhe-border);background:var(--rhe-bar);font-size:12px;">
+                                <i class="fas fa-code-compare" style="color:#38bdf8;"></i>
+                                <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${gEsc(path)} <span style="opacity:.6;font-weight:400;">HEAD ↔ 作業ツリー</span></span>
+                                <button class="rhe-icon-btn" id="rhe-git-diff-open" title="ファイルを開く"><i class="fas fa-file-code"></i></button>
+                                <button class="rhe-icon-btn" id="rhe-git-diff-x" title="閉じる (Esc)"><i class="fas fa-xmark"></i></button>
+                            </div><div id="rhe-git-diff-host" style="flex:1;min-height:0;"></div>`;
+                            root.appendChild(ov);
+                            const fname = path.split('/').pop();
+                            const mlang = toMonacoLang(detectCodeLanguage(newText || oldText, fname), fname);
+                            const origModel = monaco.editor.createModel(oldText, mlang);
+                            const modModel = monaco.editor.createModel(newText, mlang);
+                            const diffEd = monaco.editor.createDiffEditor(ov.querySelector('#rhe-git-diff-host'), {
+                                automaticLayout: true, readOnly: true, originalEditable: false, renderSideBySide: true,
+                                minimap: { enabled: false }, fontSize: editorConfig.fontSize,
+                            });
+                            diffEd.setModel({ original: origModel, modified: modModel });
+                            const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+                            function close() {
+                                document.removeEventListener('keydown', onKey, true);
+                                try { diffEd.dispose(); } catch (_) {}
+                                try { origModel.dispose(); } catch (_) {}
+                                try { modModel.dispose(); } catch (_) {}
+                                ov.remove();
+                            }
+                            document.addEventListener('keydown', onKey, true);
+                            ov.querySelector('#rhe-git-diff-x').addEventListener('click', close);
+                            ov.querySelector('#rhe-git-diff-open').addEventListener('click', () => { close(); loadFile(absPath); });
+                        }
 
                         function renderOutlineAndSnippets(container) {
                             if (!container) return;
@@ -69809,15 +70237,27 @@ body.light-mode #rhe-root {
                         editorWindow.querySelectorAll('.rhe-dock-tab').forEach(tabBtn => {
                             tabBtn.addEventListener('click', () => {
                                 editorWindow.querySelectorAll('.rhe-dock-tab').forEach(b => b.classList.toggle('active', b === tabBtn));
-                                const isTerm = tabBtn.dataset.dock === 'term';
-                                if (rheSt('rhe-term-out')) rheSt('rhe-term-out').style.display = isTerm ? 'block' : 'none';
-                                if (rheSt('rhe-stdin-row')) rheSt('rhe-stdin-row').style.display = isTerm ? 'flex' : 'none';
-                                if (rheSt('rhe-problems-list')) rheSt('rhe-problems-list').style.display = isTerm ? 'none' : 'block';
+                                const mode = tabBtn.dataset.dock;
+                                if (rheSt('rhe-term-out')) rheSt('rhe-term-out').style.display = mode === 'term' ? 'block' : 'none';
+                                if (rheSt('rhe-stdin-row')) rheSt('rhe-stdin-row').style.display = mode === 'term' ? 'flex' : 'none';
+                                if (rheSt('rhe-problems-list')) rheSt('rhe-problems-list').style.display = mode === 'problems' ? 'block' : 'none';
+                                if (rheSt('rhe-shell-host')) rheSt('rhe-shell-host').style.display = mode === 'shell' ? 'flex' : 'none';
+                                if (rheSt('rhe-shell-cd')) rheSt('rhe-shell-cd').style.display = mode === 'shell' ? '' : 'none';
+                                if (mode === 'shell') {
+                                    const dock = rheSt('rhe-bottom-dock');
+                                    if (dock && dock.offsetHeight < 280) dock.style.height = '300px';
+                                    ensureShell().then(api => api.focus()).catch(e => createNotification('エラー', e.message || String(e), 'error'));
+                                }
                             });
                         });
                         rheSt('rhe-dock-clear')?.addEventListener('click', () => {
+                            if (rheSt('rhe-shell-host')?.style.display === 'flex' && shellApi) { shellApi.state.log.innerHTML = ''; return; }
                             if (rheSt('rhe-term-out')) rheSt('rhe-term-out').innerHTML = '';
                         });
+                        rheSt('rhe-shell-cd')?.addEventListener('click', () => {
+                            if (shellApi && currentWorkspacePath) shellApi.run(`cd "${currentWorkspacePath}"`, { echo: true });
+                        });
+                        rheSt('rhe-st-git')?.addEventListener('click', () => switchSidePanel('git'));
                         rheSt('rhe-dock-close')?.addEventListener('click', () => {
                             rheSt('rhe-bottom-dock')?.classList.remove('active');
                             rheSt('rhe-toggle-dock')?.classList.remove('active');
@@ -70106,12 +70546,16 @@ body.light-mode #rhe-root {
                         if (VFS && typeof VFS.onChange === 'function') {
                             vfsUnsubscribe = VFS.onChange(() => {
                                 if (currentSidePanel === 'explorer') renderFileTree();
+                                else if (currentSidePanel === 'git') scheduleGitRefresh();
                             });
                         }
 
                         ProcessManager.register(windowId, {
                             onDestroy: () => {
                                 stopIntegratedExecution();
+                                if (gitRefreshTimer) { clearTimeout(gitRefreshTimer); gitRefreshTimer = null; }
+                                try { if (shellApi) shellApi.dispose(); } catch (_) {}
+                                shellApi = null; shellPromise = null;
                                 if (autoSaveTimer) {
                                     clearTimeout(autoSaveTimer);
                                     autoSaveTimer = null;
@@ -81986,7 +82430,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         ${[
                                     ['バージョン', `Rivift OS ver.${RIVIFT_OS_VERSION}`],
                                     //['カーネル', 'Rivift Kernel 3.0'],
-                                    ['ビルド', '2026.11.16'],
+                                    ['ビルド', '2026.11.17'],
                                     ['アーキテクチャ', 'Web (HTML5/JS)'],
                                     ['開発者', 'DANGOKYOUDAI'],
                                 ].map(([k, v]) => `<div class="sys-net-row"><span style="font-size:12px;opacity:.6;flex:1;">${k}</span><span style="font-size:12px;font-weight:500;">${v}</span></div>`).join('')}
@@ -90579,6 +91023,12 @@ RiviftConnect.connectToServer = function () {
             }
             try { window._launchApp = launchApp;
 } catch (__riviftErr) { __riviftInitFail("L83365 Expression: window._launchApp = launchApp;", __riviftErr); }
+            // コマンドアプリのシェルを任意のDOM要素に埋め込む(コードエディタの下部ドックなど)
+            window._mountCommandTerminal = (opts) => {
+                const app = apps.find(a => a.id === 'command');
+                if (!app || typeof app.launcher !== 'function') throw new Error('コマンドアプリが見つかりません');
+                return app.launcher(Object.assign({}, opts));
+            };
 
             // ===== タスクバー ウィンドウプレビュー（Windows風）=====
             let RiviftTaskbarPreview; try { RiviftTaskbarPreview = (() => {
@@ -92578,6 +93028,9 @@ ${elementSummary || '画面要素情報はありません。'}`,
                     }
                     restoreCurrentWallpaper(true);
 
+                    // ロック解除後、起動時の自動確認で見つかったアップデートがあれば知らせる(修復レポート通知と重ならないよう少し待つ)
+                    setTimeout(() => { try { if (typeof window.riviftNotifyPendingUpdate === 'function') window.riviftNotifyPendingUpdate(); } catch (_) { } }, 3500);
+
                 }
             }
 
@@ -93041,6 +93494,70 @@ ${elementSummary || '画面要素情報はありません。'}`,
 } catch (__riviftErr) { __riviftInitFail("L85846 Expression: window.riviftGetScheduledUpdate = riviftGetScheduledUpdate;", __riviftErr); }
             try { window.riviftPerformUpdate = riviftPerformUpdate;
 } catch (__riviftErr) { __riviftInitFail("L85847 Expression: window.riviftPerformUpdate = riviftPerformUpdate;", __riviftErr); }
+
+            // ===== 自動アップデート確認 (起動時 + 定期) =====
+            // ・起動して少ししたらバックグラウンドで確認し、結果を保持する
+            // ・ロック解除後(またはロック中でなければ確認完了時)に「アップデートがあります」と通知する
+            // ・以降は一定間隔で再確認し、新しいバージョンが見つかった時だけ通知する
+            const RIVIFT_AUTO_UPDATE_INTERVAL_MS = 30 * 60 * 1000;
+            let _riviftPendingUpdate = null;
+            const _riviftUpdateNotified = new Set();
+            let _riviftBgUpdateRunning = false;
+
+            function riviftAutoUpdateEnabled() {
+                try { return localStorage.getItem('riviftAutoUpdateCheck') !== 'off'; } catch (_) { return true; }
+            }
+
+            function riviftNotifyPendingUpdate() {
+                const r = _riviftPendingUpdate;
+                if (!r || !r.hasUpdate) return;
+                if (typeof isLocked !== 'undefined' && isLocked) return;           // ロック解除後に通知する
+                if (riviftGetScheduledUpdate()) return;                              // すでに適用予約済み
+                if (_riviftUpdateNotified.has(r.latestVersion)) return;              // 同じバージョンは1回だけ
+                _riviftUpdateNotified.add(r.latestVersion);
+                try {
+                    createNotification(
+                        'アップデートがあります',
+                        `Rivift OS ${r.latestVersion} が利用可能です（現在 ${RIVIFT_OS_VERSION}）。`,
+                        'info',
+                        20,
+                        null, null, null,
+                        [{ label: 'アップデートを開く', onClick: () => { try { launchApp('settings', { category: 'system-update' }); } catch (_) { } } }]
+                    );
+                } catch (e) { console.warn('[auto-update] 通知に失敗:', e); }
+            }
+
+            async function riviftBackgroundUpdateCheck(opts = {}) {
+                if (_riviftBgUpdateRunning) return;
+                if (!opts.force && !riviftAutoUpdateEnabled()) return;
+                if (navigator.onLine === false) return;
+                if (document.getElementById('rivift-update-overlay')) return;       // 更新作業中は確認しない
+                _riviftBgUpdateRunning = true;
+                try {
+                    const result = await riviftCheckForUpdate();
+                    try { localStorage.setItem('riviftLastUpdateCheck', String(Date.now())); } catch (_) { }
+                    if (result && !result.error && result.hasUpdate) {
+                        _riviftPendingUpdate = result;
+                        riviftNotifyPendingUpdate();
+                    } else if (result && !result.error) {
+                        _riviftPendingUpdate = null;
+                    }
+                } catch (e) {
+                    console.warn('[auto-update] 確認に失敗:', e);
+                } finally {
+                    _riviftBgUpdateRunning = false;
+                }
+            }
+            try { window.riviftBackgroundUpdateCheck = riviftBackgroundUpdateCheck; window.riviftNotifyPendingUpdate = riviftNotifyPendingUpdate; window.riviftAutoUpdateEnabled = riviftAutoUpdateEnabled; } catch (_) { }
+
+            setTimeout(() => riviftBackgroundUpdateCheck(), 4000);
+            setInterval(() => riviftBackgroundUpdateCheck(), RIVIFT_AUTO_UPDATE_INTERVAL_MS);
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible') return;
+                const last = Number(localStorage.getItem('riviftLastUpdateCheck') || 0);
+                if (Date.now() - last > RIVIFT_AUTO_UPDATE_INTERVAL_MS) riviftBackgroundUpdateCheck();
+            });
+            window.addEventListener('online', () => riviftBackgroundUpdateCheck());
             async function riviftClearUpdateCache() {
                 try {
                     localStorage.removeItem('riviftUpdatedVersion');
