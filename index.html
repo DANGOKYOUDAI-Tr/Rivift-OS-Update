@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.4.1";
+        var CURRENT_FILE_VERSION = "5.4.2";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -16523,7 +16523,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.4.1';
+            var RIVIFT_OS_VERSION = '5.4.2';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -39922,30 +39922,60 @@ ${assistantAnswer.slice(0, 1000)}
                         const year = now.getFullYear(), month = now.getMonth();
                         const todayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
                         const firstDay = new Date(year, month, 1).getDay(), daysInMonth = new Date(year, month + 1, 0).getDate();
+                        const weeks = Math.ceil((firstDay + daysInMonth) / 7);
                         const todayEvents = (calendarDataCache && calendarDataCache[todayKey]) || [];
                         const maxEv = Number(widgetData.maxEvents) || 3;
+                        const accent = widgetData.accentColor || '#007bff';
+                        const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+                        // ウィジェットの高さから、予定欄に使える行数を計算する(はみ出して見切れないようにする)
+                        const PAD = 32, HEADER_H = 24, GAP = 4, WEEKDAY_H = 14, CELL_MIN = 22, EV_LINE = 20, EV_CHROME = 9;
+                        const innerH = Math.max(0, (widgetEl.clientHeight || widgetData.height || 260) - PAD);
+                        const gridMin = WEEKDAY_H + weeks * CELL_MIN;
+                        const spaceLines = Math.max(1, Math.floor((innerH - HEADER_H - GAP - gridMin - GAP - EV_CHROME) / EV_LINE));
+                        const want = Math.min(maxEv, todayEvents.length);
+                        let shown = want, moreRow = 0;
+                        if (want > spaceLines) {
+                            shown = Math.max(1, spaceLines - 1);
+                            moreRow = spaceLines > 1 ? todayEvents.length - shown : 0;
+                        }
+
                         let cells = '';
-                        for (let i = 0; i < firstDay; i++) cells += `<div></div>`;
+                        for (let i = 0; i < firstDay; i++) cells += `<div class="cal-cell"></div>`;
                         for (let i = 1; i <= daysInMonth; i++) {
                             const isToday = i === now.getDate();
-                            cells += `<div style="aspect-ratio:1;display:grid;place-items:center;border-radius:50%;font-size:0.75rem;${isToday ? `background:${widgetData.accentColor};color:#fff;font-weight:700;` : ''}cursor:default;">${i}</div>`;
+                            cells += `<div class="cal-cell"><span style="${isToday ? `background:${accent};color:#fff;font-weight:700;` : ''}">${i}</span></div>`;
                         }
-                        const eventsHtml = widgetData.showEvents && todayEvents.length
-                            ? todayEvents.slice(0, maxEv).map(e => `<div class="flex items-center gap-1.5 text-xs truncate py-0.5"><span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${e.color || widgetData.accentColor}"></span><span class="truncate opacity-80">${e.title}</span></div>`).join('')
-                            : `<p class="text-xs opacity-40">予定なし</p>`;
+
+                        let eventsHtml = '';
+                        if (widgetData.showEvents) {
+                            const rows = todayEvents.length
+                                ? todayEvents.slice(0, shown).map(e => `<div class="flex items-center gap-1.5 text-xs truncate py-0.5"><span class="w-2 h-2 rounded-full flex-shrink-0" style="background:${esc(e.color || accent)}"></span><span class="truncate opacity-80">${esc(e.title)}</span></div>`).join('')
+                                + (moreRow ? `<div class="text-xs opacity-50 py-0.5">+${moreRow}件</div>` : '')
+                                : `<p class="text-xs opacity-40">予定なし</p>`;
+                            eventsHtml = `<div class="flex-shrink-0 border-t border-white/10 pt-1 mt-0.5 overflow-hidden">${rows}</div>`;
+                        }
+
+                        const resizeHandle = widgetEl.querySelector('.widget-resize-handle');
                         widgetEl.innerHTML = `
-                <style>#${widgetData.id} .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}</style>
-                <div class="w-full h-full flex flex-col gap-1">
+                <style>
+                    #${widgetData.id} .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:auto repeat(${weeks},minmax(0,1fr));gap:2px;flex:1 1 0;min-height:0;}
+                    #${widgetData.id} .cal-cell{display:flex;align-items:center;justify-content:center;min-height:0;overflow:hidden;font-size:0.75rem;line-height:1;cursor:default;}
+                    #${widgetData.id} .cal-cell>span{display:grid;place-items:center;height:100%;max-height:24px;aspect-ratio:1;border-radius:50%;}
+                </style>
+                <div class="w-full h-full flex flex-col gap-1" style="min-height:0;overflow:hidden;">
                     <div class="flex items-center justify-between flex-shrink-0 mb-1">
                         <span class="font-semibold text-sm">${year}年${month + 1}月</span>
                         <span class="text-xs opacity-50">${now.getDate()}日</span>
                     </div>
-                    <div class="cal-grid flex-shrink-0">
+                    <div class="cal-grid">
                         ${['日', '月', '火', '水', '木', '金', '土'].map((d, i) => `<div class="text-center text-[10px] ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'opacity-50'}">${d}</div>`).join('')}
                         ${cells}
                     </div>
-                    <div class="flex-grow border-t border-white/10 pt-1 mt-1 overflow-hidden">${eventsHtml}</div>
+                    ${eventsHtml}
                 </div>`;
+                        // innerHTML の書き換えでリサイズハンドルが消えないように戻す
+                        if (resizeHandle) widgetEl.appendChild(resizeHandle);
                     }
                 },
 
@@ -43834,6 +43864,7 @@ self.addEventListener("message", function(ev) {
                         const depthOpt = rest.find(a => a.startsWith('--depth='));
                         const depth = depthOpt ? parseInt(depthOpt.split('=')[1], 10) : (rest.includes('--full') ? undefined : 1);
                         const progEl = appendLine(`<span class="t-info">Cloning into '${escHtml(repoName)}'...</span>`);
+                        let cloneLine = null, clonePhase = null;
                         try {
                             await git.clone({
                                 fs, http, dir, url, corsProxy,
@@ -43841,15 +43872,18 @@ self.addEventListener("message", function(ev) {
                                 onAuth: getAuth,
                                 onProgress: (ev) => {
                                     if (signal?.aborted) throw new Error('Aborted');
-                                    progEl.innerHTML = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)} ${ev.loaded || 0}${ev.total ? '/' + ev.total : ''}</span>`;
+                                    // フェーズが変わるたびに新しい行を追加(同じフェーズ内のカウントだけ同じ行を更新)
+                                    const cloneHtml = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)} ${ev.loaded || 0}${ev.total ? '/' + ev.total : ''}</span>`;
+                                    if (!cloneLine || ev.phase !== clonePhase) { clonePhase = ev.phase; cloneLine = appendLine(cloneHtml); }
+                                    else cloneLine.innerHTML = cloneHtml;
                                 },
                             });
-                            progEl.innerHTML = `<span class="t-ok">✓ Cloned ${escHtml(url)} → ${escHtml(dir)}</span>`;
+                            appendLine(`<span class="t-ok">✓ Cloned ${escHtml(url)} → ${escHtml(dir)}</span>`);
                             return null;
                         } catch (cloneErr) {
                             const gh = parseGitHubRepoUrl(url);
                             if (!gh) { await vfs.vfsRmRf(dir).catch(() => {}); throw cloneErr; }
-                            progEl.innerHTML = `<span class="t-warn">CORS proxy fallback → GitHub REST API (${escHtml(gh.owner)}/${escHtml(gh.repo)})...</span>`;
+                            appendLine(`<span class="t-warn">CORS proxy fallback → GitHub REST API (${escHtml(gh.owner)}/${escHtml(gh.repo)})...</span>`);
                             const tok = gcfg['github.token'] || termEnv.GITHUB_TOKEN;
                             const headers = tok ? { Authorization: `Bearer ${tok}` } : {};
                             const metaRes = await fetch(`https://api.github.com/repos/${gh.owner}/${gh.repo}`, { headers, signal });
@@ -43871,14 +43905,15 @@ self.addEventListener("message", function(ev) {
                                     const buf = new Uint8Array(await r.arrayBuffer());
                                     await vfs.vfsWriteBytes(vfs.normPath(dir, b.path), buf);
                                     done++;
-                                    progEl.innerHTML = `<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> <span class="t-val">${done}/${blobs.length}</span> <span class="t-muted">${escHtml(b.path)}</span>`;
+                                    const dlStep = Math.max(1, Math.ceil(blobs.length / 10));
+                                    if (done === blobs.length || done % dlStep === 0) appendLine(`<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> <span class="t-val">${done}/${blobs.length}</span> <span class="t-muted">${escHtml(b.path)}</span>`);
                                 }));
                             }
                             await git.init({ fs, dir, defaultBranch: defBranch });
                             await git.addRemote({ fs, dir, remote: 'origin', url });
                             for (const b of blobs) await git.add({ fs, dir, filepath: b.path }).catch(() => {});
                             await git.commit({ fs, dir, author: getAuthor(), message: `Clone snapshot from ${gh.owner}/${gh.repo}@${defBranch}` });
-                            progEl.innerHTML = `<span class="t-ok">✓ Cloned ${escHtml(gh.owner)}/${escHtml(gh.repo)} (${blobs.length} files, branch: ${escHtml(defBranch)}) → ${escHtml(dir)}</span>`;
+                            appendLine(`<span class="t-ok">✓ Cloned ${escHtml(gh.owner)}/${escHtml(gh.repo)} (${blobs.length} files, branch: ${escHtml(defBranch)}) → ${escHtml(dir)}</span>`);
                             return null;
                         }
                     }
@@ -44257,12 +44292,12 @@ self.addEventListener("message", function(ev) {
                         const item = queue.shift();
                         if (resolved.has(item.name)) continue;
                         depthGuard++;
-                        prog.innerHTML = `<span class="t-info">npm:</span> fetching metadata <span class="t-val">${escHtml(item.name)}</span>...`;
                         const meta = await fetchPkgMeta(item.name, signal);
                         const ver = pickMatchingVersion(meta, item.range);
                         if (!ver || !meta.versions?.[ver]) throw new Error(`No matching version for ${item.name}@${item.range}`);
                         const verMeta = meta.versions[ver];
                         resolved.set(item.name, { version: ver, meta: verMeta });
+                        appendLine(`<span class="t-muted">npm</span> resolved <span class="t-val">${escHtml(item.name)}@${escHtml(ver)}</span>`);
                         if (verMeta.dependencies) {
                             for (const [dn, dr] of Object.entries(verMeta.dependencies)) {
                                 if (!resolved.has(dn)) queue.push({ name: dn, range: dr });
@@ -44286,7 +44321,7 @@ self.addEventListener("message", function(ev) {
                         idx++;
                         const tarballUrl = info.meta.dist?.tarball;
                         if (!tarballUrl) continue;
-                        prog.innerHTML = `<span class="t-info">npm [${idx}/${entries.length}]:</span> downloading <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span>`;
+                        appendLine(`<span class="t-info">npm [${idx}/${entries.length}]:</span> downloading <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span>`);
                         const tarRes = await fetch(tarballUrl, { signal });
                         if (!tarRes.ok) throw new Error(`Failed to download tarball for ${pkgName}: ${tarRes.status}`);
                         const gz = new Uint8Array(await tarRes.arrayBuffer());
@@ -44302,6 +44337,7 @@ self.addEventListener("message", function(ev) {
                                 vfs.vfsWriteBytes(vfs.normPath(pkgDest, f.path), f.data)
                             ));
                         }
+                        appendLine(`<span class="t-ok">  ✓</span> <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span> <span class="t-muted">(${keepFiles.length} files)</span>`);
                         lockJson.packages['node_modules/' + pkgName] = {
                             version: info.version,
                             resolved: tarballUrl,
@@ -44318,7 +44354,7 @@ self.addEventListener("message", function(ev) {
                     await vfs.vfsWriteText(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n', 'application/json');
                     await vfs.vfsWriteText(lockPath, JSON.stringify(lockJson, null, 2) + '\n', 'application/json');
                     const sec = ((Date.now() - t0) / 1000).toFixed(2);
-                    prog.innerHTML = `<span class="t-ok">✓ added ${entries.length} package(s) in ${sec}s</span>`;
+                    appendLine(`<span class="t-ok">✓ added ${entries.length} package(s) in ${sec}s</span>`);
                     return { added: entries.length };
                 }
 
@@ -46035,7 +46071,7 @@ self.addEventListener("message", function(ev) {
                             const rawFiles = await collectFiles(pubRoot, pubRoot, fbCfg.hosting.ignore || [], vfs);
                             if (!rawFiles.length) throw new Error(`No files found in hosting public directory: ${pubRoot}`);
 
-                            prog.innerHTML = `<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> hashing ${rawFiles.length} file(s)...`;
+                            appendLine(`<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> hashing ${rawFiles.length} file(s)...`);
                             const fileMap = {};
                             const gzByHash = new Map();
                             for (const f of rawFiles) {
@@ -46070,7 +46106,8 @@ self.addEventListener("message", function(ev) {
                             for (const h of reqHashes) {
                                 if (signal?.aborted) throw new Error('Aborted');
                                 upCount++;
-                                prog.innerHTML = `<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> uploading ${upCount}/${reqHashes.length}...`;
+                                const upStep = Math.max(1, Math.ceil(reqHashes.length / 10));
+                                if (upCount === 1 || upCount === reqHashes.length || upCount % upStep === 0) appendLine(`<span class="t-info">i  hosting[${escHtml(siteId)}]:</span> uploading ${upCount}/${reqHashes.length}...`);
                                 const upRes = await fetch(`${pop.uploadUrl}/${h}`, {
                                     method: 'POST',
                                     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
@@ -57255,7 +57292,7 @@ button:hover{filter:brightness(1.08)}
                                                 itemDiv._riviftDraggedEls = null;
                                             });
                                             if (item.type === 'folder') {
-                                                itemDiv.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; itemDiv.style.backgroundColor = 'rgba(0, 123, 255, 0.3)'; });
+                                                itemDiv.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; itemDiv.style.backgroundColor = 'rgba(0, 123, 255, 0.3)'; });
                                                 itemDiv.addEventListener('dragleave', () => { itemDiv.style.backgroundColor = ''; });
                                                 itemDiv.addEventListener('drop', async (e) => {
                                                     e.preventDefault();
@@ -57712,6 +57749,54 @@ button:hover{filter:brightness(1.08)}
                                 }
                             }
                         });
+                        // ---- 開いているフォルダ(現在の階層)の画面へドロップして移動 ----
+                        // フォルダのアイコンに重ねなくても、フォルダ画面の空きスペース・ヘッダー上へドロップすれば
+                        // そのフォルダに移動する(別ウィンドウのエクスプローラーからのドロップも可)。
+                        {
+                            const filesPane = grid.parentElement;
+                            const isItemDrag = (dt) => !!dt && Array.from(dt.types || []).includes('application/x-rivift-paths');
+                            filesPane.addEventListener('dragover', (e) => {
+                                if (!isItemDrag(e.dataTransfer)) return;
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = 'move';
+                            });
+                            filesPane.addEventListener('drop', async (e) => {
+                                if (!isItemDrag(e.dataTransfer)) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const destPath = currentPath;
+                                let paths = [];
+                                try { paths = JSON.parse(e.dataTransfer.getData('application/x-rivift-paths') || '[]'); } catch { paths = []; }
+                                paths = [...new Set((Array.isArray(paths) ? paths : []).filter(p => typeof p === 'string' && p))];
+                                const movable = paths.filter(src => {
+                                    const parent = src.substring(0, src.lastIndexOf('/')) || '/';
+                                    return src !== destPath && !destPath.startsWith(src + '/') && parent !== destPath;
+                                });
+                                if (!movable.length) return;
+                                let ok = 0, ng = 0;
+                                for (const src of movable) {
+                                    try {
+                                        if (destPath === '/Trash') await VFS.delete(src);
+                                        else await VFS.move(src, destPath);
+                                        ok++;
+                                    } catch (err) {
+                                        console.error(`Failed to move ${src}:`, err);
+                                        ng++;
+                                    }
+                                }
+                                if (ok > 0) createNotification('移動完了', `${ok} 個のアイテムを ${destPath === '/' ? 'OS' : destPath} に移動しました。`, 'info');
+                                if (ng > 0) createNotification('エラー', `${ng} 個のアイテムの移動に失敗しました。`, 'error');
+                                selectedFiles.clear();
+                                await renderFiles(destPath);
+                                // 移動元になった可能性のある他のエクスプローラーも更新
+                                document.querySelectorAll('[id^="app-window-files"]').forEach(w => {
+                                    if (w !== filesWindow && typeof w._riviftNavigate === 'function' && typeof w._riviftGetPath === 'function') {
+                                        try { w._riviftNavigate(w._riviftGetPath()); } catch (_) {}
+                                    }
+                                });
+                            });
+                        }
+
                         grid.addEventListener('contextmenu', (e) => {
                             if (e.target.closest('[data-path]')) return;
                             e.preventDefault();
@@ -81901,7 +81986,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         ${[
                                     ['バージョン', `Rivift OS ver.${RIVIFT_OS_VERSION}`],
                                     //['カーネル', 'Rivift Kernel 3.0'],
-                                    ['ビルド', '2026.11.15'],
+                                    ['ビルド', '2026.11.16'],
                                     ['アーキテクチャ', 'Web (HTML5/JS)'],
                                     ['開発者', 'DANGOKYOUDAI'],
                                 ].map(([k, v]) => `<div class="sys-net-row"><span style="font-size:12px;opacity:.6;flex:1;">${k}</span><span style="font-size:12px;font-weight:500;">${v}</span></div>`).join('')}
