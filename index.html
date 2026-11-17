@@ -82,7 +82,7 @@
         if (window.__RIVIFT_BOOTED_FROM_STORAGE__) return;
 
         // ※ 必ず RIVIFT_OS_VERSION と同じ値にすること(これが大きいと、アップデート版が「古い」と判定されて破棄される)
-        var CURRENT_FILE_VERSION = "5.4.2";
+        var CURRENT_FILE_VERSION = "5.4.3";
         // ※ RiviftLogger は本体スクリプトで後から定義されるため、ブートローダー内では直接呼ばない
         //   (呼ぶと ReferenceError でクリーンブートが中断され、アップデートが反映されなくなる)
         function __riviftBootLog(msg) {
@@ -16523,7 +16523,7 @@ body.light-mode #ai-selection-panel {
 
             var systemLanguage = localStorage.getItem('riviftSystemLanguage') || 'ja-JP';
 
-            var RIVIFT_OS_VERSION = '5.4.2';
+            var RIVIFT_OS_VERSION = '5.4.3';
 
             var RIVIFT_UPDATE_CONFIG = {
                 owner: 'DANGOKYOUDAI-Tr',      // GitHubユーザー名（確定）
@@ -43782,7 +43782,16 @@ self.addEventListener("message", function(ev) {
                 }
 
                 // エディタのGitパネルなど、他の画面からisomorphic-gitを使うための共有口
-                window.__RiviftGitCore = { loadIsomorphicGit, makeGitFs, findGitRoot, loadGitGlobalCfg };
+                function makeGitProgress(appendLine, escHtml, title, signal) {
+                    let line = null, phase = null;
+                    return (ev) => {
+                        if (signal?.aborted) throw new Error('Aborted');
+                        const html = `<span class="t-info">${escHtml(title)}:</span> <span class="t-muted">${escHtml(ev.phase || '')}</span> ` +
+                            (ev.total ? window.__riviftProgressBar(ev.loaded || 0, ev.total, '', 24, 'pacman') : `<span class="t-muted">${ev.loaded || 0}</span>`);
+                        if (!line || ev.phase !== phase) { phase = ev.phase; line = appendLine(html); } else line.innerHTML = html;
+                    };
+                }
+                window.__RiviftGitCore = { loadIsomorphicGit, makeGitFs, findGitRoot, loadGitGlobalCfg, saveGitGlobalCfg };
 
                 window.__RiviftShellExt.git = async (args, ctx) => {
                     const sub = (args[0] || 'help').toLowerCase();
@@ -43876,7 +43885,7 @@ self.addEventListener("message", function(ev) {
                                 onProgress: (ev) => {
                                     if (signal?.aborted) throw new Error('Aborted');
                                     // フェーズが変わるたびに新しい行を追加(同じフェーズ内のカウントだけ同じ行を更新)
-                                    const cloneHtml = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)}</span> ` + (ev.total ? window.__riviftProgressBar(ev.loaded || 0, ev.total, '', 20) : `<span class="t-muted">${ev.loaded || 0}</span>`);
+                                    const cloneHtml = `<span class="t-info">Cloning '${escHtml(repoName)}':</span> <span class="t-muted">${escHtml(ev.phase)}</span> ` + (ev.total ? window.__riviftProgressBar(ev.loaded || 0, ev.total, '', 24, 'pacman') : `<span class="t-muted">${ev.loaded || 0}</span>`);
                                     if (!cloneLine || ev.phase !== clonePhase) { clonePhase = ev.phase; cloneLine = appendLine(cloneHtml); }
                                     else cloneLine.innerHTML = cloneHtml;
                                 },
@@ -43909,7 +43918,7 @@ self.addEventListener("message", function(ev) {
                                     await vfs.vfsWriteBytes(vfs.normPath(dir, b.path), buf);
                                     done++;
                                     const dlStep = Math.max(1, Math.ceil(blobs.length / 10));
-                                    if (done === blobs.length || done % dlStep === 0) appendLine(`<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> ${window.__riviftProgressBar(done, blobs.length, 'files', 20)}`);
+                                    if (done === blobs.length || done % dlStep === 0) appendLine(`<span class="t-info">Downloading ${escHtml(gh.repo)}:</span> ${window.__riviftProgressBar(done, blobs.length, 'files', 24, 'pacman')}`);
                                 }));
                             }
                             await git.init({ fs, dir, defaultBranch: defBranch });
@@ -44076,15 +44085,15 @@ self.addEventListener("message", function(ev) {
                         const branch = rest[1] || await git.currentBranch({ fs, dir }).catch(() => 'main');
                         appendLine(`<span class="t-info">git ${sub} ${escHtml(remote)} ${escHtml(branch)}...</span>`);
                         if (sub === 'fetch') {
-                            await git.fetch({ fs, http, dir, remote, ref: branch, corsProxy, onAuth: getAuth });
+                            await git.fetch({ fs, http, dir, remote, ref: branch, corsProxy, onAuth: getAuth, onProgress: makeGitProgress(appendLine, escHtml, 'git fetch', signal) });
                             return `<span class="t-ok">✓ fetched ${escHtml(remote)}/${escHtml(branch)}</span>`;
                         }
                         if (sub === 'pull') {
-                            await git.pull({ fs, http, dir, remote, ref: branch, singleBranch: true, corsProxy, author: getAuthor(), onAuth: getAuth });
+                            await git.pull({ fs, http, dir, remote, ref: branch, singleBranch: true, corsProxy, author: getAuthor(), onAuth: getAuth, onProgress: makeGitProgress(appendLine, escHtml, 'git pull', signal) });
                             return `<span class="t-ok">✓ pulled ${escHtml(remote)}/${escHtml(branch)}</span>`;
                         }
                         try {
-                            const res = await git.push({ fs, http, dir, remote, ref: branch, corsProxy, onAuth: getAuth });
+                            const res = await git.push({ fs, http, dir, remote, ref: branch, corsProxy, onAuth: getAuth, onProgress: makeGitProgress(appendLine, escHtml, 'git push', signal) });
                             return `<span class="t-ok">✓ pushed to ${escHtml(remote)}/${escHtml(branch)} (${res?.ok ? 'ok' : 'done'})</span>`;
                         } catch (pushErr) {
                             const remotes = await git.listRemotes({ fs, dir });
@@ -44265,11 +44274,17 @@ self.addEventListener("message", function(ev) {
                 }
 
                 // コマンドライン風のテキスト進捗バー: [█████░░░░░] 50%  5/10
-                window.__riviftProgressBar = (done, total, label = '', width = 28) => {
+                window.__riviftProgressBar = (done, total, label = '', width = 28, style = 'bar') => {
                     const ratio = total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
                     const filled = Math.round(ratio * width);
                     const pct = String(Math.floor(ratio * 100)).padStart(3, ' ').replace(/ /g, '&nbsp;');
                     const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                    if (style === 'pacman') {
+                        // パックマンが餌(·)を食べながら進む: [      ᗧ·······] 40%
+                        const pos = Math.min(width - 1, Math.floor(ratio * width));
+                        const mouth = (done % 2 === 0) ? 'ᗧ' : '●';
+                        return `<span class="t-muted">[</span><span class="t-warn">${'&nbsp;'.repeat(pos)}${mouth}</span><span class="t-muted">${'·'.repeat(width - pos - 1)}]</span> <span class="t-val">${pct}%</span> <span class="t-muted">${done}/${total}${label ? ' ' + esc(label) : ''}</span>`;
+                    }
                     return `<span class="t-muted">[</span><span class="t-ok">${'█'.repeat(filled)}</span><span class="t-muted">${'░'.repeat(width - filled)}]</span> <span class="t-val">${pct}%</span> <span class="t-muted">${done}/${total}${label ? ' ' + esc(label) : ''}</span>`;
                 };
 
@@ -44313,22 +44328,37 @@ self.addEventListener("message", function(ev) {
 
                     const prog = appendLine(`<span class="t-info">npm: resolving dependencies...</span>`);
                     const resolved = new Map();
-                    let depthGuard = 0;
+                    const seen = new Set();
+                    const RESOLVE_CONC = 12;   // メタデータ取得の同時数
+                    const DOWNLOAD_CONC = 6;   // tarball の同時ダウンロード数
+                    let pending = queue.splice(0);
+                    let resolvedCount = 0;
 
-                    while (queue.length && depthGuard < 120) {
+                    // 依存関係の解決: 同じ深さの依存をまとめて並列に取得する
+                    while (pending.length && resolvedCount < 500) {
                         if (signal?.aborted) throw new Error('Aborted');
-                        const item = queue.shift();
-                        if (resolved.has(item.name)) continue;
-                        depthGuard++;
-                        const meta = await fetchPkgMeta(item.name, signal);
-                        const ver = pickMatchingVersion(meta, item.range);
-                        if (!ver || !meta.versions?.[ver]) throw new Error(`No matching version for ${item.name}@${item.range}`);
-                        const verMeta = meta.versions[ver];
-                        resolved.set(item.name, { version: ver, meta: verMeta });
-                        appendLine(`<span class="t-muted">npm</span> resolved <span class="t-val">${escHtml(item.name)}@${escHtml(ver)}</span>`);
-                        if (verMeta.dependencies) {
-                            for (const [dn, dr] of Object.entries(verMeta.dependencies)) {
-                                if (!resolved.has(dn)) queue.push({ name: dn, range: dr });
+                        const batch = [];
+                        for (const item of pending) {
+                            if (!seen.has(item.name)) { seen.add(item.name); batch.push(item); }
+                        }
+                        pending = [];
+                        for (let i = 0; i < batch.length; i += RESOLVE_CONC) {
+                            if (signal?.aborted) throw new Error('Aborted');
+                            const results = await Promise.all(batch.slice(i, i + RESOLVE_CONC).map(async (item) => {
+                                const meta = await fetchPkgMeta(item.name, signal);
+                                const ver = pickMatchingVersion(meta, item.range);
+                                if (!ver || !meta.versions?.[ver]) throw new Error(`No matching version for ${item.name}@${item.range}`);
+                                return { item, ver, verMeta: meta.versions[ver] };
+                            }));
+                            for (const { item, ver, verMeta } of results) {
+                                resolved.set(item.name, { version: ver, meta: verMeta });
+                                resolvedCount++;
+                                appendLine(`<span class="t-muted">npm</span> resolved <span class="t-val">${escHtml(item.name)}@${escHtml(ver)}</span>`);
+                                if (verMeta.dependencies) {
+                                    for (const [dn, dr] of Object.entries(verMeta.dependencies)) {
+                                        if (!seen.has(dn)) pending.push({ name: dn, range: dr });
+                                    }
+                                }
                             }
                         }
                     }
@@ -44342,38 +44372,58 @@ self.addEventListener("message", function(ev) {
                     await vfs.vfsMkdirP(nmRoot);
 
                     const entries = Array.from(resolved.entries());
-                    let idx = 0;
+                    const total = entries.length;
+                    let started = 0, finished = 0, nextIdx = 0, skipped = 0, failure = null;
                     const t0 = Date.now();
-                    setBar(0, entries.length);
-                    for (const [pkgName, info] of entries) {
-                        if (signal?.aborted) throw new Error('Aborted');
-                        idx++;
+                    setBar(0, total);
+
+                    const installOne = async (pkgName, info) => {
                         const tarballUrl = info.meta.dist?.tarball;
-                        if (!tarballUrl) continue;
-                        appendLine(`<span class="t-info">npm [${idx}/${entries.length}]:</span> downloading <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span>`);
+                        if (!tarballUrl) return;
+                        const pkgDest = vfs.normPath(nmRoot, pkgName);
+                        const lockEntry = { version: info.version, resolved: tarballUrl, integrity: info.meta.dist?.integrity || '' };
+                        // すでに同じバージョンが入っていればダウンロードを省略
+                        try {
+                            const cur = JSON.parse(await vfs.vfsReadText(vfs.normPath(pkgDest, 'package.json')));
+                            if (cur && cur.version === info.version) {
+                                lockJson.packages['node_modules/' + pkgName] = lockEntry;
+                                skipped++;
+                                appendLine(`<span class="t-muted">  = ${escHtml(pkgName)}@${escHtml(info.version)} (up to date)</span>`);
+                                return;
+                            }
+                        } catch (_) { }
+                        const n = ++started;
+                        appendLine(`<span class="t-info">npm [${n}/${total}]:</span> downloading <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span>`);
                         const tarRes = await fetch(tarballUrl, { signal });
                         if (!tarRes.ok) throw new Error(`Failed to download tarball for ${pkgName}: ${tarRes.status}`);
                         const gz = new Uint8Array(await tarRes.arrayBuffer());
                         const tarBytes = await gunzipBytes(gz);
                         const files = parseTar(tarBytes);
 
-                        const pkgDest = vfs.normPath(nmRoot, pkgName);
                         await vfs.vfsRmRf(pkgDest).catch(() => {});
                         await vfs.vfsMkdirP(pkgDest);
                         const keepFiles = files.filter(f => f.data.length <= 2 * 1024 * 1024);
-                        for (let i = 0; i < keepFiles.length; i += 8) {
-                            await Promise.all(keepFiles.slice(i, i + 8).map(f =>
+                        for (let i = 0; i < keepFiles.length; i += 16) {
+                            await Promise.all(keepFiles.slice(i, i + 16).map(f =>
                                 vfs.vfsWriteBytes(vfs.normPath(pkgDest, f.path), f.data)
                             ));
                         }
                         appendLine(`<span class="t-ok">  ✓</span> <span class="t-val">${escHtml(pkgName)}@${escHtml(info.version)}</span> <span class="t-muted">(${keepFiles.length} files)</span>`);
-                        setBar(idx, entries.length);
-                        lockJson.packages['node_modules/' + pkgName] = {
-                            version: info.version,
-                            resolved: tarballUrl,
-                            integrity: info.meta.dist?.integrity || '',
-                        };
-                    }
+                        lockJson.packages['node_modules/' + pkgName] = lockEntry;
+                    };
+
+                    // ワーカープール: 複数パッケージのダウンロード・展開・書き込みを同時に進める
+                    const worker = async () => {
+                        while (!failure && nextIdx < entries.length) {
+                            if (signal?.aborted) { failure = new Error('Aborted'); break; }
+                            const [pkgName, info] = entries[nextIdx++];
+                            try { await installOne(pkgName, info); } catch (e) { failure = failure || e; break; }
+                            finished++;
+                            setBar(finished, total);
+                        }
+                    };
+                    await Promise.all(Array.from({ length: Math.min(DOWNLOAD_CONC, total) }, worker));
+                    if (failure) throw failure;
 
                     for (const da of directAdded) {
                         const r = resolved.get(da.name);
@@ -44384,7 +44434,7 @@ self.addEventListener("message", function(ev) {
                     await vfs.vfsWriteText(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n', 'application/json');
                     await vfs.vfsWriteText(lockPath, JSON.stringify(lockJson, null, 2) + '\n', 'application/json');
                     const sec = ((Date.now() - t0) / 1000).toFixed(2);
-                    appendLine(`<span class="t-ok">✓ added ${entries.length} package(s) in ${sec}s</span>`);
+                    appendLine(`<span class="t-ok">✓ added ${entries.length} package(s)${skipped ? ` (${skipped} up to date)` : ''} in ${sec}s</span>`);
                     return { added: entries.length };
                 }
 
@@ -52467,10 +52517,6 @@ mark.br-find-hit.cur{background:#f28b82}
                             }
 
                             const desiredMode = navOpts.modeOverride || getDomainMode(url, tab);
-                            // 検索結果ページを「直接 iframe」で開くと、結果リンクのクリックを横取りできず
-                            // (target=_blank がサンドボックスでブロックされる等)ページに移動できない。
-                            // 検索結果はプロキシ表示(リンクを拾うブリッジ付き)で読み込み、失敗した時だけ直接表示に戻す。
-                            const serpViaProxy = desiredMode === 'direct' && isSerpUrl(url) && !navOpts._directSerp;
                             const embedType = getEmbedType(url);
                             const embedUrl = (desiredMode === 'auto' || desiredMode === 'direct') ? getEmbedUrl(url, embedType) : null;
 
@@ -52507,7 +52553,7 @@ mark.br-find-hit.cur{background:#f28b82}
                             }
                             if (isStaleNav()) return;
 
-                            if (desiredMode === 'direct' && !serpViaProxy) {
+                            if (desiredMode === 'direct') {
                                 tab.connType = 'embed';
                                 tab.proxyName = '直接 iframe';
                                 hideAllInternalPages();
@@ -52686,10 +52732,6 @@ mark.br-find-hit.cur{background:#f28b82}
                             } catch (_) { }
                             if (isStaleNav()) return;
 
-                            if (serpViaProxy) {
-                                // プロキシでは取得できなかった → 従来どおり直接 iframe で表示
-                                return navigateTo(input, tab, Object.assign({}, navOpts, { _directSerp: true, skipGlobalHistory: true }));
-                            }
                             tab.connType = 'blocked';
                             tab.proxyName = '';
                             tab.loading = false;
@@ -67205,8 +67247,10 @@ body.light-mode #rhe-root {
 #rhe-split-prog-view { flex:1; display:none; flex-direction:column; overflow:hidden; background:var(--rhe-editor); color:var(--rhe-tx); font-family:'DM Mono','Consolas',monospace; }
 #rhe-split-prog-view.active { display:flex; }
 /* 下部統合ターミナル＆コマンドライン */
-#rhe-bottom-dock { height:205px; min-height:110px; max-height:60%; border-top:1px solid var(--rhe-border); background:var(--rhe-bg); display:none; flex-direction:column; flex-shrink:0; }
+#rhe-bottom-dock { height:205px; min-height:110px; max-height:85%; position:relative; border-top:1px solid var(--rhe-border); background:var(--rhe-bg); display:none; flex-direction:column; flex-shrink:0; }
 #rhe-bottom-dock.active { display:flex; }
+#rhe-dock-resizer { position:absolute; left:0; right:0; top:-3px; height:7px; cursor:ns-resize; z-index:6; touch-action:none; }
+#rhe-dock-resizer:hover, #rhe-dock-resizer.dragging { background:rgba(56,189,248,0.55); }
 #rhe-shell-host { flex:1; min-height:0; display:none; flex-direction:column; }
 #rhe-shell-host > #term-root { flex:1; min-height:0; height:auto; }
 .rhe-git { padding:8px; display:flex; flex-direction:column; gap:8px; font-size:12px; }
@@ -67466,6 +67510,7 @@ body.light-mode #rhe-root {
 
       <!-- 下部統合ターミナル・コマンドライン・問題ドック -->
       <div id="rhe-bottom-dock">
+        <div id="rhe-dock-resizer" title="ドラッグで高さを変更 / ダブルクリックでリセット"></div>
         <div id="rhe-dock-header">
           <button class="rhe-dock-tab active" data-dock="term"><i class="fas fa-terminal"></i> ターミナル / 出力</button>
           <button class="rhe-dock-tab" data-dock="shell" title="コマンドアプリと同じシェル"><i class="fas fa-square-terminal"></i> シェル</button>
@@ -68052,6 +68097,8 @@ body.light-mode #rhe-root {
                             const ta = sc.querySelector('#rhe-git-msg');
                             if (ta) gitState.msgDraft = ta.value;
                             const dis = gitState.busy ? 'disabled' : '';
+                            let needIdentity = false;
+                            try { const c = window.__RiviftGitCore.loadGitGlobalCfg(); needIdentity = !c['user.name'] || !c['user.email']; } catch (_) { }
                             const btn = (act, icon, title, extra = '') => `<button class="rhe-icon-btn" data-act="${act}" title="${title}" ${dis} ${extra}><i class="fas fa-${icon}"></i></button>`;
                             let html = '<div class="rhe-git">';
                             if (!gitState.loaded && !gitState.error) {
@@ -68061,15 +68108,27 @@ body.light-mode #rhe-root {
                             } else if (gitState.noRepo) {
                                 html += `<div class="rhe-git-empty">${currentWorkspacePath ? 'このフォルダは Git リポジトリではありません。' : 'エクスプローラーでフォルダを開いてください。'}</div>`;
                                 if (currentWorkspacePath) html += `<button class="rhe-tb-btn primary" data-act="init" ${dis} style="justify-content:center;">リポジトリを初期化</button>`;
+                                html += `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">
+                                    <div style="font-size:11px;color:var(--rhe-tx2);">または、リモートからクローン</div>
+                                    <input id="rhe-git-clone-url" type="text" placeholder="https://github.com/user/repo" style="background:var(--rhe-editor);border:1px solid var(--rhe-border);color:var(--rhe-tx);border-radius:4px;font-size:12px;padding:4px 6px;">
+                                    <button class="rhe-tb-btn" data-act="clone" ${dis} style="justify-content:center;"><i class="fas fa-download"></i> クローン</button>
+                                </div>`;
                             } else {
                                 const branches = gitState.branches.includes(gitState.branch) ? gitState.branches : [gitState.branch, ...gitState.branches];
                                 html += `<div style="display:flex;align-items:center;gap:4px;">
                                     <select id="rhe-git-branch" ${dis} style="flex:1;min-width:0;padding:3px 4px;">${branches.map(b => `<option value="${gEsc(b)}" ${b === gitState.branch ? 'selected' : ''}>${gEsc(b)}</option>`).join('')}</select>
-                                    ${btn('newBranch', 'plus', '新しいブランチ')}${btn('fetch', 'cloud-arrow-down', 'fetch')}${btn('pull', 'arrow-down', 'pull')}${btn('push', 'arrow-up', 'push')}${btn('refresh', 'rotate-right', '更新')}
+                                    ${btn('newBranch', 'plus', '新しいブランチ')}
                                 </div>
+                                <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;">
+                                    ${btn('fetch', 'cloud-arrow-down', 'fetch')}${btn('pull', 'arrow-down', 'pull')}${btn('push', 'arrow-up', 'push')}${btn('sync', 'arrows-rotate', '同期 (pull → push)')}${btn('refresh', 'rotate-right', '更新')}${btn('remote', 'link', 'リモートURLを設定')}${btn('settings', 'gear', 'ユーザー名・メール・GitHubトークンの設定')}
+                                </div>
+                                ${needIdentity ? `<div style="background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.35);border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.5;">コミット者の名前/メールが未設定です。<a data-act="settings" style="color:#38bdf8;cursor:pointer;text-decoration:underline;">設定する</a></div>` : ''}
                                 <div style="display:flex;flex-direction:column;gap:4px;">
-                                    <textarea id="rhe-git-msg" rows="3" placeholder="コミットメッセージ (Ctrl+Enter でコミット)" style="width:100%;padding:6px 8px;resize:vertical;">${gEsc(gitState.msgDraft)}</textarea>
-                                    <button class="rhe-tb-btn primary" data-act="commit" ${dis} style="justify-content:center;"><i class="fas fa-check"></i> コミット${gitState.staged.length ? ` (${gitState.staged.length})` : ''}</button>
+                                    <textarea id="rhe-git-msg" rows="3" placeholder="コミットメッセージ (Ctrl+Enter でコミット / Ctrl+Shift+Enter でコミット&プッシュ)" style="width:100%;padding:6px 8px;resize:vertical;">${gEsc(gitState.msgDraft)}</textarea>
+                                    <div style="display:flex;gap:4px;">
+                                        <button class="rhe-tb-btn primary" data-act="commit" ${dis} style="flex:1;justify-content:center;"><i class="fas fa-check"></i> コミット${gitState.staged.length ? ` (${gitState.staged.length})` : ''}</button>
+                                        <button class="rhe-tb-btn" data-act="commitPush" ${dis} title="コミットしてプッシュ" style="justify-content:center;"><i class="fas fa-arrow-up"></i></button>
+                                    </div>
                                 </div>`;
                                 const row = (f) => {
                                     const name = f.path.split('/').pop();
@@ -68098,7 +68157,8 @@ body.light-mode #rhe-root {
                             };
                             sc.onchange = (e) => { if (e.target.id === 'rhe-git-branch') gitAction('checkout', e.target.value); };
                             sc.onkeydown = (e) => {
-                                if (e.target.id === 'rhe-git-msg' && (e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); gitAction('commit'); }
+                                if (e.target.id === 'rhe-git-msg' && (e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); gitAction(e.shiftKey ? 'commitPush' : 'commit'); }
+                                if (e.target.id === 'rhe-git-clone-url' && e.key === 'Enter') { e.preventDefault(); gitAction('clone'); }
                             };
                         }
 
@@ -68127,7 +68187,30 @@ body.light-mode #rhe-root {
                                 const g = await gitCtx();
                                 const { git, fs, api } = g;
                                 const dir = g.dir;
-                                if (act === 'init') {
+                                if (act === 'clone') {
+                                    const curl = ((gitState.sc && gitState.sc.querySelector('#rhe-git-clone-url')) || {}).value || '';
+                                    if (!curl.trim()) throw new Error('クローンするリポジトリのURLを入力してください');
+                                    api.setCwd(currentWorkspacePath || api.getCwd());
+                                    showShellDock();
+                                    await api.run(`git clone ${curl.trim()}`, { echo: true });
+                                    createNotification('Git', 'クローンしたフォルダは、エクスプローラーから開けます。', 'info');
+                                } else if (act === 'settings') {
+                                    const core = window.__RiviftGitCore;
+                                    const cfg = core.loadGitGlobalCfg();
+                                    const nm = await showMessageBox('Git ユーザー名', 'コミットに使う名前を入力してください。', { showCancel: true, input: { value: cfg['user.name'] || '' } });
+                                    if (nm !== null && nm !== undefined) {
+                                        const em = await showMessageBox('Git メールアドレス', 'コミットに使うメールアドレスを入力してください。', { showCancel: true, input: { value: cfg['user.email'] || '' } });
+                                        if (em !== null && em !== undefined) {
+                                            const tk = await showMessageBox('GitHub トークン', 'push/pull 用の Personal Access Token を入力してください（空欄なら変更しません）。', { showCancel: true, input: { placeholder: cfg['github.token'] ? '設定済み (****' + String(cfg['github.token']).slice(-4) + ')' : 'ghp_...' } });
+                                            const next = core.loadGitGlobalCfg();
+                                            if (String(nm).trim()) next['user.name'] = String(nm).trim();
+                                            if (String(em).trim()) next['user.email'] = String(em).trim();
+                                            if (tk && String(tk).trim()) next['github.token'] = String(tk).trim();
+                                            core.saveGitGlobalCfg(next);
+                                            createNotification('Git', '設定を保存しました。', 'info');
+                                        }
+                                    }
+                                } else if (act === 'init') {
                                     if (!currentWorkspacePath) throw new Error('先にフォルダを開いてください');
                                     await git.init({ fs, dir: currentWorkspacePath, defaultBranch: 'main' });
                                     createNotification('Git', 'リポジトリを初期化しました。', 'info');
@@ -68152,7 +68235,7 @@ body.light-mode #rhe-root {
                                         else await git.checkout({ fs, dir, filepaths: [path], force: true });
                                         await reloadOpenTabsFromDisk([abs]);
                                     }
-                                } else if (act === 'commit') {
+                                } else if (act === 'commit' || act === 'commitPush') {
                                     const msg = (gitState.msgDraft || '').trim();
                                     if (!msg) throw new Error('コミットメッセージを入力してください');
                                     if (!gitState.staged.length) {
@@ -68166,12 +68249,32 @@ body.light-mode #rhe-root {
                                     const sha = await git.commit({ fs, dir, author: gitAuthor(api), message: msg });
                                     gitState.msgDraft = '';
                                     createNotification('コミット完了', `${sha.slice(0, 7)} ${msg.split('\n')[0]}`, 'info');
+                                    if (act === 'commitPush') {
+                                        api.setCwd(dir);
+                                        showShellDock();
+                                        await api.run('git push', { echo: true });
+                                    }
                                 } else if (act === 'checkout') {
                                     await git.checkout({ fs, dir, ref: path });
                                     await reloadOpenTabsFromDisk();
                                 } else if (act === 'newBranch') {
                                     const name = await showMessageBox('新しいブランチ', '新しいブランチ名を入力してください', { showCancel: true, input: { value: '' } });
                                     if (name && String(name).trim()) await git.branch({ fs, dir, ref: String(name).trim(), checkout: true });
+                                } else if (act === 'remote') {
+                                    const remotes = await git.listRemotes({ fs, dir }).catch(() => []);
+                                    const cur = remotes.find(r => r.remote === 'origin');
+                                    const url = await showMessageBox('リモートURL (origin)', 'リモートリポジトリのURLを入力してください。', { showCancel: true, input: { value: cur ? cur.url : '', placeholder: 'https://github.com/user/repo.git' } });
+                                    if (url && String(url).trim()) {
+                                        if (cur) await git.deleteRemote({ fs, dir, remote: 'origin' });
+                                        await git.addRemote({ fs, dir, remote: 'origin', url: String(url).trim() });
+                                        createNotification('Git', 'リモート origin を設定しました。', 'info');
+                                    }
+                                } else if (act === 'sync') {
+                                    api.setCwd(dir);
+                                    showShellDock();
+                                    await api.run('git pull', { echo: true });
+                                    await api.run('git push', { echo: true });
+                                    await reloadOpenTabsFromDisk();
                                 } else if (act === 'fetch' || act === 'pull' || act === 'push') {
                                     // 進捗バーなどはシェルの出力として見せる
                                     api.setCwd(dir);
@@ -70245,7 +70348,7 @@ body.light-mode #rhe-root {
                                 if (rheSt('rhe-shell-cd')) rheSt('rhe-shell-cd').style.display = mode === 'shell' ? '' : 'none';
                                 if (mode === 'shell') {
                                     const dock = rheSt('rhe-bottom-dock');
-                                    if (dock && dock.offsetHeight < 280) dock.style.height = '300px';
+                                    if (dock && !localStorage.getItem('riviftEditorDockHeight') && dock.offsetHeight < 280) dock.style.height = '300px';
                                     ensureShell().then(api => api.focus()).catch(e => createNotification('エラー', e.message || String(e), 'error'));
                                 }
                             });
@@ -70258,6 +70361,46 @@ body.light-mode #rhe-root {
                             if (shellApi && currentWorkspacePath) shellApi.run(`cd "${currentWorkspacePath}"`, { echo: true });
                         });
                         rheSt('rhe-st-git')?.addEventListener('click', () => switchSidePanel('git'));
+
+                        // ---- 下部ドック(ターミナル等)とエディタの高さの比率をドラッグで変更 ----
+                        {
+                            const dock = rheSt('rhe-bottom-dock'), handle = rheSt('rhe-dock-resizer');
+                            const KEY = 'riviftEditorDockHeight', DEFAULT_H = 205, MIN_H = 110;
+                            const colEl = dock ? dock.parentElement : null;
+                            const clampH = (h) => Math.min(Math.max(MIN_H, (colEl ? colEl.clientHeight : 600) - 120), Math.max(MIN_H, h));
+                            const relayout = () => { try { if (monacoEditor) monacoEditor.layout(); } catch (_) { } };
+                            try { const saved = Number(localStorage.getItem(KEY)); if (dock && saved > 0) dock.style.height = clampH(saved) + 'px'; } catch (_) { }
+                            if (dock && handle) {
+                                let startY = 0, startH = 0;
+                                handle.addEventListener('pointerdown', (e) => {
+                                    e.preventDefault();
+                                    startY = e.clientY; startH = dock.offsetHeight;
+                                    try { handle.setPointerCapture(e.pointerId); } catch (_) { }
+                                    document.body.style.userSelect = 'none';
+                                    handle.classList.add('dragging');
+                                });
+                                handle.addEventListener('pointermove', (e) => {
+                                    if (!handle.hasPointerCapture || !handle.hasPointerCapture(e.pointerId)) return;
+                                    dock.style.height = clampH(startH + (startY - e.clientY)) + 'px';
+                                    relayout();
+                                });
+                                const endDrag = (e) => {
+                                    if (!handle.hasPointerCapture || !handle.hasPointerCapture(e.pointerId)) return;
+                                    try { handle.releasePointerCapture(e.pointerId); } catch (_) { }
+                                    document.body.style.userSelect = '';
+                                    handle.classList.remove('dragging');
+                                    try { localStorage.setItem(KEY, String(dock.offsetHeight)); } catch (_) { }
+                                    relayout();
+                                };
+                                handle.addEventListener('pointerup', endDrag);
+                                handle.addEventListener('pointercancel', endDrag);
+                                handle.addEventListener('dblclick', () => {
+                                    dock.style.height = DEFAULT_H + 'px';
+                                    try { localStorage.removeItem(KEY); } catch (_) { }
+                                    relayout();
+                                });
+                            }
+                        }
                         rheSt('rhe-dock-close')?.addEventListener('click', () => {
                             rheSt('rhe-bottom-dock')?.classList.remove('active');
                             rheSt('rhe-toggle-dock')?.classList.remove('active');
@@ -81660,7 +81803,7 @@ input[type=range].ve-prop-input{accent-color:var(--ac);padding:0;}
 </style>
 <div id="camera-app-container">
     <div id="camera-preview-wrapper">
-        <video id="camera-video-preview" autoplay playsinline></video>
+        <video id="camera-video-preview" autoplay muted playsinline></video>
         <p id="camera-error-message" class="hidden"></p>
         <div id="camera-flash-effect"></div>
         <div id="record-timer" class="hidden">00:00</div>
@@ -81698,6 +81841,8 @@ input[type=range].ve-prop-input{accent-color:var(--ac);padding:0;}
                                     video: { width: { ideal: 1280 }, height: { ideal: 720 } },
                                     audio: true // ★★★ 音声も録音するために audio: true に変更！ ★★★
                                 });
+                                video.muted = true;
+                                video.volume = 0;
                                 video.srcObject = cameraStream;
                                 errorMessage.classList.add('hidden');
                             } catch (err) {
@@ -81830,6 +81975,7 @@ input[type=range].ve-prop-input{accent-color:var(--ac);padding:0;}
                                     cameraStream.getTracks().forEach(track => track.stop());
                                     cameraStream = null;
                                 }
+                                video.srcObject = null;
                             },
                             onResume: () => {
                                 startCamera();
@@ -81839,7 +81985,9 @@ input[type=range].ve-prop-input{accent-color:var(--ac);padding:0;}
                                 stopTimer();
                                 if (cameraStream) {
                                     cameraStream.getTracks().forEach(track => track.stop());
+                                    cameraStream = null;
                                 }
+                                video.srcObject = null;
                             },
                         });
 
