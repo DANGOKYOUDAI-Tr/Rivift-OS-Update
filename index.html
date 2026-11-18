@@ -23892,7 +23892,9 @@ VFS.init();
                 };
 
                 try {
-                    await loadScriptLocalFirst('./cdn/socket.io/socket.io.min.js', 'https://cdn.socket.io/4.7.5/socket.io.min.js');
+                    if (typeof io === 'undefined') {
+                        await (window.__riviftSocketIoPromise || (window.__riviftSocketIoPromise = loadScriptLocalFirst('./cdn/socket.io/socket.io.min.js', 'https://cdn.socket.io/4.7.5/socket.io.min.js').catch(err => { window.__riviftSocketIoPromise = null; throw err; })));
+                    }
                     await updateProgress(20);
                     await loadScriptLocalFirst('./cdn/face-api/face-api.min.js', 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js');
                     await updateProgress(35);
@@ -94148,7 +94150,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         return;
                     }
                     if (!RiviftConnect.socket) {
-                        RiviftConnect.connectToServer?.();
+                        await RiviftConnect.connectToServer?.();
                     }
                     if (!RiviftConnect.socket) {
                         RiviftConnect.showToast('サーバーに接続できていません', 'error');
@@ -95093,45 +95095,116 @@ const _callSocketHandlers = {};
 _callSocketHandlers.onReconnect = () => { if (callState === 'incoming') endCall(false, '着信が中断されました'); };
 if (RiviftConnect._callApi && !RiviftConnect._callApi.handlers) RiviftConnect._callApi.handlers = _callSocketHandlers;
 
-RiviftConnect.connectToServer = function () {
-    if (typeof io === 'undefined') {
-        RiviftConnect.showToast("接続サービスの読み込みに失敗しました。", "error");
-        console.error("Socket.IO (io) is not defined.");
-        return;
+RiviftConnect._ensureSocketIo = async function () {
+    if (typeof io !== 'undefined') return true;
+    if (!window.__riviftSocketIoPromise) {
+        const loadTag = (src) => new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = () => (typeof io !== 'undefined' ? resolve(true) : reject(new Error(`io undefined after ${src}`)));
+            s.onerror = () => reject(new Error(`読み込み失敗: ${src}`));
+            document.head.appendChild(s);
+        });
+        window.__riviftSocketIoPromise = (async () => {
+            if (location.protocol !== 'file:') {
+                try {
+                    const res = await fetch('./cdn/socket.io/socket.io.min.js', { method: 'GET' });
+                    const ct = res.headers.get('content-type') || '';
+                    if (res.ok && !ct.includes('text/html')) {
+                        const text = await res.text();
+                        const s = document.createElement('script');
+                        s.textContent = text;
+                        document.head.appendChild(s);
+                        if (typeof io !== 'undefined') return true;
+                    }
+                } catch (_) {}
+            } else {
+                try {
+                    await loadTag('./cdn/socket.io/socket.io.min.js');
+                    return true;
+                } catch (_) {}
+            }
+            try {
+                await loadTag('https://cdn.socket.io/4.7.5/socket.io.min.js');
+                return true;
+            } catch (_) {
+                window.__riviftSocketIoPromise = null;
+                return false;
+            }
+        })();
     }
+    try {
+        await window.__riviftSocketIoPromise;
+    } catch (_) {
+        window.__riviftSocketIoPromise = null;
+    }
+    return typeof io !== 'undefined';
+};
 
+RiviftConnect.connectToServer = async function () {
     if (RiviftConnect.socket) {
-        if (RiviftConnect.socket.connected) return;
-        if (RiviftConnect.socket.active) return;
-        RiviftConnect.socket.connect();
-        return;
+        if (!RiviftConnect.socket.connected && !RiviftConnect.socket.active) {
+            RiviftConnect.socket.connect();
+        }
+        return RiviftConnect.socket;
+    }
+    if (RiviftConnect._connectPromise) {
+        return RiviftConnect._connectPromise;
     }
 
-    const _riviftAuthToken = localStorage.getItem('rivift_auth_token');
-    if (!_riviftAuthToken) {
-        RiviftConnect.showToast("チャット機能を使うには、設定からパスワードを設定（移行）してください。", "error");
-        return;
-    }
+    RiviftConnect._connectPromise = (async () => {
+        try {
+            const loaded = await RiviftConnect._ensureSocketIo();
+            if (!loaded || typeof io === 'undefined') {
+                RiviftConnect.showToast("接続サービスの読み込みに失敗しました。", "error");
+                console.error("Socket.IO (io) is not defined.");
+                return null;
+            }
 
-    RiviftConnect.socket = io(RiviftConnect.SERVER_URL, { 
-        // [FIX] 再接続のたびに最新トークンを読む（固定オブジェクトだと古いトークンで再接続し続ける）
-        auth: (cb) => cb({ token: localStorage.getItem('rivift_auth_token') || _riviftAuthToken }),
-        // [PERF] 最初からWebSocketで接続（polling→upgrade の往復を省く）。不可なら自動でpollingにフォールバック
-        transports: ['websocket', 'polling'],
-        reconnection: true,                     // 自動再接続を有効化
-        reconnectionAttempts: Infinity,          // 無限に再試行
-        reconnectionDelay: 1000,                // 最初は1秒後
-        reconnectionDelayMax: 5000,             // 最大5秒間隔
-    });
+            if (RiviftConnect.socket) {
+                if (!RiviftConnect.socket.connected && !RiviftConnect.socket.active) {
+                    RiviftConnect.socket.connect();
+                }
+                return RiviftConnect.socket;
+            }
 
-    RiviftConnect.socket.on("connect", () => {
-        console.log("Connect App: サーバーに接続しました！ ID:", RiviftConnect.socket.id);
-        if (RiviftConnect.currentUser) RiviftConnect.socket.emit('login', { email: RiviftConnect.currentUser.email });
-        // [FIX] 着信中に切断→再接続した場合、古い着信状態が残って以後の着信が全部「通話中」扱いになるのを防ぐ
-        try { RiviftConnect._callApi?.handlers?.onReconnect?.(); } catch (_) {}
-        try { if (typeof window.ProximityShare?.init === 'function') window.ProximityShare.init(); } catch (e) { console.warn('[PS] init on connect failed', e); }
-        document.dispatchEvent(new CustomEvent('rivift-connect-ready'));
-    });
+            const _riviftAuthToken = localStorage.getItem('rivift_auth_token');
+            if (!_riviftAuthToken) {
+                RiviftConnect.showToast("チャット機能を使うには、設定からパスワードを設定（移行）してください。", "error");
+                return null;
+            }
+
+            RiviftConnect.socket = io(RiviftConnect.SERVER_URL, { 
+                // [FIX] 再接続のたびに最新トークンを読む（固定オブジェクトだと古いトークンで再接続し続ける）
+                auth: (cb) => cb({ token: localStorage.getItem('rivift_auth_token') || _riviftAuthToken }),
+                // [PERF] 最初からWebSocketで接続（polling→upgrade の往復を省く）。不可なら自動でpollingにフォールバック
+                transports: ['websocket', 'polling'],
+                reconnection: true,                     // 自動再接続を有効化
+                reconnectionAttempts: Infinity,          // 無限に再試行
+                reconnectionDelay: 1000,                // 最初は1秒後
+                reconnectionDelayMax: 5000,             // 最大5秒間隔
+            });
+
+            RiviftConnect.socket.on("connect", () => {
+                console.log("Connect App: サーバーに接続しました！ ID:", RiviftConnect.socket.id);
+                if (RiviftConnect.currentUser) RiviftConnect.socket.emit('login', { email: RiviftConnect.currentUser.email });
+                if (RiviftConnect.DOM?.contactList && RiviftConnect.currentUser?.friends?.length > 0) {
+                    RiviftConnect.socket.emit('get_initial_statuses', { email: RiviftConnect.currentUser.email }, (statuses) => {
+                        if (!statuses || !RiviftConnect.DOM?.contactList) return;
+                        for (const [email, isOnline] of Object.entries(statuses)) {
+                            const li = RiviftConnect.DOM.contactList.querySelector(`li[data-email="${CSS.escape(email)}"] .last-message`);
+                            if (li) {
+                                li.style.color = isOnline ? '#28a745' : '#6c757d';
+                                li.innerHTML = `<i class="fas fa-circle" style="font-size: 8px; margin-right: 4px;"></i>${isOnline ? 'オンライン' : 'オフライン'}`;
+                            }
+                        }
+                    });
+                }
+                // [FIX] 着信中に切断→再接続した場合、古い着信状態が残って以後の着信が全部「通話中」扱いになるのを防ぐ
+                try { RiviftConnect._callApi?.handlers?.onReconnect?.(); } catch (_) {}
+                try { if (typeof window.ProximityShare?.init === 'function') window.ProximityShare.init(); } catch (e) { console.warn('[PS] init on connect failed', e); }
+                document.dispatchEvent(new CustomEvent('rivift-connect-ready'));
+            });
 
                     RiviftConnect.socket.on("connect_error", (err) => {
                         if (err && err.message && (err.message.includes('認証') || err.message.includes('トークン'))) {
@@ -95225,7 +95298,7 @@ RiviftConnect.connectToServer = function () {
                     RiviftConnect.socket.on('friend_status_changed', (data) => {
                         const { email, isOnline } = data;
 
-                        const contactLi = RiviftConnect.DOM.contactList.querySelector(`li[data-email="${email}"] .last-message`);
+                        const contactLi = RiviftConnect.DOM?.contactList?.querySelector(`li[data-email="${CSS.escape(email)}"] .last-message`);
                         if (contactLi) {
                             const statusColor = isOnline ? '#28a745' : '#6c757d';
                             const statusText = isOnline ? 'オンライン' : 'オフライン';
@@ -95278,7 +95351,13 @@ RiviftConnect.connectToServer = function () {
                         }
                     });
 
-                }
+            return RiviftConnect.socket;
+        } finally {
+            RiviftConnect._connectPromise = null;
+        }
+    })();
+    return RiviftConnect._connectPromise;
+}
 
                 let isRegisterMode = false;
                 if (RiviftConnect.DOM.authToggleLink) {
@@ -95415,7 +95494,7 @@ RiviftConnect.connectToServer = function () {
                                 }
                             });
 
-                            RiviftConnect.socket.emit('get_initial_statuses', { email: RiviftConnect.currentUser.email }, (statuses) => {
+                            RiviftConnect.socket?.emit('get_initial_statuses', { email: RiviftConnect.currentUser.email }, (statuses) => {
                                 for (const [email, isOnline] of Object.entries(statuses)) {
                                     const li = RiviftConnect.DOM.contactList.querySelector(`li[data-email="${email}"] .last-message`);
                                     if (li) {
@@ -95481,7 +95560,7 @@ RiviftConnect.connectToServer = function () {
                                 RiviftConnect.DOM.requestsBadge.classList.toggle('visible', remaining > 0);
                                 RiviftConnect.DOM.requestsBadge.innerText = remaining || '';
 
-                                RiviftConnect.socket.emit('accept_friend_request', { from: fromEmail }, (res) => {
+                                RiviftConnect.socket?.emit('accept_friend_request', { from: fromEmail }, (res) => {
                                     if (res && res.error) {
                                         RiviftConnect.showToast(`承認失敗: ${res.error}`, "error");
                                     }
@@ -95501,7 +95580,7 @@ RiviftConnect.connectToServer = function () {
                                 RiviftConnect.DOM.requestsBadge.classList.toggle('visible', remaining > 0);
                                 RiviftConnect.DOM.requestsBadge.innerText = remaining || '';
 
-                                RiviftConnect.socket.emit('reject_friend_request', { from: fromEmail });
+                                RiviftConnect.socket?.emit('reject_friend_request', { from: fromEmail });
                             };
 
                             RiviftConnect.DOM.requestList.appendChild(li);
@@ -95539,7 +95618,7 @@ RiviftConnect.connectToServer = function () {
                                 if (RiviftConnect.currentUser?.sentRequests) {
                                     RiviftConnect.currentUser.sentRequests = RiviftConnect.currentUser.sentRequests.filter(e => (e || '').trim().toLowerCase() !== normTo);
                                 }
-                                RiviftConnect.socket.emit('cancel_friend_request', { from: RiviftConnect.currentUser.email, to: toEmail });
+                                RiviftConnect.socket?.emit('cancel_friend_request', { from: RiviftConnect.currentUser.email, to: toEmail });
                             };
                             RiviftConnect.DOM.sentRequestList.appendChild(li);
                         });
@@ -95711,7 +95790,7 @@ RiviftConnect.connectToServer = function () {
 
                     await loadMoreHistory(true);
 
-                    RiviftConnect.socket.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: partnerEmail });
+                    RiviftConnect.socket?.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: partnerEmail });
                 };
 
                 RiviftConnect.createMessageElement = async function (from, body, senderIcon, type, read = false, timestamp, id = null) {
@@ -96416,7 +96495,7 @@ RiviftConnect.connectToServer = function () {
                             RiviftConnect._messagesCache[fromEmail].push(msgDiv);
                         }
 
-                        RiviftConnect.socket.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: fromEmail });
+                        RiviftConnect.socket?.emit('read_receipt', { from: RiviftConnect.currentUser.email, to: fromEmail });
                     } else {
                         let partnerData = RiviftConnect._usersCache ? RiviftConnect._usersCache[fromEmail] : null;
                         if (!partnerData) {
@@ -96853,6 +96932,13 @@ RiviftConnect.connectToServer = function () {
                     if (replyPreview) replyPreview.style.display = 'none';
 
                     try {
+                        if (!RiviftConnect.socket) {
+                            await RiviftConnect.connectToServer?.();
+                        }
+                        if (!RiviftConnect.socket) {
+                            RiviftConnect.showToast('サーバーに接続できていません。しばらく待ってから再試行してください', 'error');
+                            return;
+                        }
                         // [FIX] サーバーの結果(ack)を待ち、失敗したら送信者にも分かるようにする
                         RiviftConnect.socket.timeout(15000).emit('private_message', msg, (err, res) => {
                             if (res && res.ok === false && msg.fileBlob) RiviftConnect.discardUpload(msg.id, partnerEmail, false);
@@ -97196,6 +97282,8 @@ RiviftConnect.connectToServer = function () {
                             const publicKey = await window.crypto.subtle.importKey("jwk", recipientData.publicKeyJwk, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["encrypt"]);
                             const mailContent = { type: 'mail', subject, body };
                             const encryptedBody = await RiviftConnect.encryptMessage(publicKey, mailContent);
+                            if (!RiviftConnect.socket) await RiviftConnect.connectToServer?.();
+                            if (!RiviftConnect.socket) throw new Error("サーバーに接続できていません。");
                             RiviftConnect.socket.emit('private_message', {
                                 from: RiviftConnect.currentUser.email,
                                 to,
@@ -97235,6 +97323,8 @@ RiviftConnect.connectToServer = function () {
                             const curSent = (RiviftConnect.currentUser.sentRequests || []).map(e => (e || '').toLowerCase());
                             if (curSent.includes(friendEmail)) throw new Error("既に申請を送信済みです。");
 
+                            if (!RiviftConnect.socket) await RiviftConnect.connectToServer?.();
+                            if (!RiviftConnect.socket) throw new Error("サーバーに接続できていません。");
                             RiviftConnect.socket.emit('send_friend_request', { from: RiviftConnect.currentUser.email, to: friendEmail }, (res) => {
                                 if (res && res.error) RiviftConnect.showToast(res.error, "error");
                             });
@@ -97464,6 +97554,9 @@ RiviftConnect.connectToServer = function () {
                     setupDragAndDropForChat(appWindow);
 
                     if (RiviftConnect.currentUser) {
+                        if (!RiviftConnect.socket || (!RiviftConnect.socket.connected && !RiviftConnect.socket.active)) {
+                            RiviftConnect.connectToServer();
+                        }
                         RiviftConnect.initializeAppUI();
                     }
                 }
