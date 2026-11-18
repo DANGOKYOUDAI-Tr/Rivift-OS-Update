@@ -92763,8 +92763,30 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 let _turnState = null;      // { phase: 'asking'|'waiting'|'responding'|'granted', timer?, peerAccepted? }
                 let _turnDialogCancel = null;
 
+                // この通話で一度でもビデオ/画面共有が使われたら、以後TURNは絶対に使わない（音声に戻っても同様）
+                let _videoUsedInCall = false;
+
                 function _turnAllowedForThisCall() {
-                    return baseCallType === 'audio' && currentCallType !== 'video' && !isScreenSharing && !isRemoteScreenSharing;
+                    if (baseCallType !== 'audio' || currentCallType === 'video' || isScreenSharing || isRemoteScreenSharing || isCameraEnabled) _videoUsedInCall = true;
+                    return !_videoUsedInCall;
+                }
+
+                // ビデオ/画面共有が始まった時に呼ぶ。TURN許可済み/確認中なら取り消し、STUNのみに戻してICE再起動する
+                async function _revokeTurnIfVideo() {
+                    if (_turnAllowedForThisCall()) return;
+                    const pc = peerConnection;
+                    const partner = currentCallPartner;
+                    if (!_turnState) return;
+                    const wasGranted = _turnState.phase === 'granted';
+                    if (_turnDialogCancel) { const c = _turnDialogCancel; _turnDialogCancel = null; try { c(); } catch (_) {} }
+                    if (partner) { try { RiviftConnect.socket.emit('webrtc-turn-confirm-response', { to: partner, accepted: false }); } catch (_) {} }
+                    _resetTurnState();
+                    if (wasGranted && pc && peerConnection === pc) {
+                        try {
+                            pc.setConfiguration(Object.assign({}, pc.getConfiguration(), { iceServers: _getP2PStunServers() }));
+                            pc.restartIce(); // 次のOfferでrelay候補を捨てて再接続（失敗すれば通話は終了）
+                        } catch (e) { console.error('[TURN] STUNへの戻し失敗:', e); endCall(true, '中継サーバーを停止できなかったため、通話を終了しました'); }
+                    }
                 }
 
                 function _resetTurnState() {
@@ -92817,6 +92839,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     const pc = peerConnection;
                     const partner = currentCallPartner;
                     if (!pc || !partner) return;
+                    if (!_turnAllowedForThisCall()) { _resetTurnState(); endCall(true, 'ビデオ/画面共有中は中継サーバーを使えないため、通話を終了しました'); return; }
                     if (_turnState && _turnState.timer) clearTimeout(_turnState.timer);
                     let _resolveConfigured;
                     const st = _turnState = { phase: 'granted', configured: new Promise(r => { _resolveConfigured = r; }) };
@@ -93254,17 +93277,42 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     _syncScreenShareUI();
                 }
 
-                async function _renegotiateOffer(reason = 'screen') {
-                    if (!peerConnection || !currentCallPartner || !RiviftConnect.socket) return;
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-                    await new Promise((resolve) => {
-                        RiviftConnect.socket.timeout(6000).emit('webrtc-renegotiate-offer', {
-                            to: currentCallPartner,
-                            offer: peerConnection.localDescription,
-                            reason,
-                        }, () => resolve());
-                    });
+                // 再ネゴシエーションは1本ずつ直列化し、相手のAnswerを受け取るまで次のOfferを出さない。
+                // （以前は送信ACKだけで完了扱いにしていたため、Answer前に次のOfferが出て
+                //   「Called in wrong state: stable」になっていた）
+                let _renegChain = Promise.resolve();
+                let _renegAnswerWaiter = null; // { pc, resolve }
+
+                function _renegotiateOffer(reason = 'screen') {
+                    const run = async () => {
+                        const pc = peerConnection;
+                        const partner = currentCallPartner;
+                        if (!pc || !partner || !RiviftConnect.socket) return;
+                        // 相手のOfferに応答中などで stable でないときは落ち着くまで待つ
+                        for (let i = 0; i < 40 && pc.signalingState !== 'stable'; i++) {
+                            await new Promise(r => setTimeout(r, 150));
+                            if (peerConnection !== pc) return;
+                        }
+                        if (pc.signalingState !== 'stable') return;
+                        const offer = await pc.createOffer();
+                        if (pc.signalingState !== 'stable') return;
+                        await pc.setLocalDescription(offer);
+                        const answered = new Promise((resolve) => {
+                            const t = setTimeout(() => { if (_renegAnswerWaiter && _renegAnswerWaiter.pc === pc) _renegAnswerWaiter = null; resolve(false); }, 10000);
+                            _renegAnswerWaiter = { pc, resolve: (v) => { clearTimeout(t); _renegAnswerWaiter = null; resolve(v); } };
+                        });
+                        await new Promise((resolve) => {
+                            RiviftConnect.socket.timeout(6000).emit('webrtc-renegotiate-offer', {
+                                to: partner,
+                                offer: pc.localDescription,
+                                reason,
+                            }, () => resolve());
+                        });
+                        await answered; // Answerが来る(またはタイムアウト)まで次へ進まない
+                    };
+                    const p = _renegChain.then(run, run);
+                    _renegChain = p.catch(() => {});
+                    return p;
                 }
 
                 function _emitScreenShareStatus(isSharing, extra = {}) {
@@ -93502,6 +93550,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         return;
                     }
 
+                    _revokeTurnIfVideo();
                     _emitScreenShareStatus(true);
                     if (!_vcTimerInterval && callState === 'active') _startVideoTimer();
                     _syncScreenShareUI();
@@ -93720,6 +93769,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     if (isCameraEnabled && baseCallType === 'audio') {
                         baseCallType = 'video';
                     }
+                    if (isCameraEnabled) _revokeTurnIfVideo();
                     _syncScreenShareUI();
                 }
 
@@ -94095,6 +94145,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     const prevState = callState;
                     _clearPcDisconnectTimer();
                     _resetTurnState();
+                    _videoUsedInCall = false;
                     callState = 'idle';
                     isCallActive = false; // 後方互換
                     stopAllSounds();
@@ -94550,6 +94601,7 @@ const _callSocketHandlers = {};
                     _callSocketHandlers['camera_status_changed'] = ((payload) => {
                         if (appWindow && (currentCallPartner || RiviftConnect.activeConversation?.partnerEmail) === payload.from) {
                             isRemoteCameraOff = !!payload.isCameraOff;
+                            if (!isRemoteCameraOff) { _videoUsedInCall = true; _revokeTurnIfVideo(); }
                             _syncScreenShareUI();
                         }
                     });
@@ -94558,6 +94610,7 @@ const _callSocketHandlers = {};
                         if (!payload || _fromOtherPeer(payload)) return;
                         isRemoteScreenSharing = !!payload.isSharing;
                         if (isRemoteScreenSharing) {
+                            _videoUsedInCall = true; _revokeTurnIfVideo();
                             if (payload.screenStreamId) remoteScreenStreamId = payload.screenStreamId;
                             if (payload.screenTrackId) remoteScreenTrackId = payload.screenTrackId;
                             if (payload.screenMid) remoteScreenMid = payload.screenMid;
@@ -94581,6 +94634,13 @@ const _callSocketHandlers = {};
                                 await Promise.race([_turnState.configured, new Promise(r => setTimeout(r, 6000))]); // 自分側のTURN設定完了を待つ
                                 if (!peerConnection) return;
                             }
+                            // Offerが衝突(glare)した場合: メールアドレスが小さい側が譲る(rollback)、大きい側は相手のOfferを無視
+                            if (peerConnection.signalingState !== 'stable') {
+                                const polite = RiviftConnect.currentUser.email < payload.from;
+                                if (!polite) return;
+                                try { await peerConnection.setLocalDescription({ type: 'rollback' }); } catch (_) {}
+                                if (_renegAnswerWaiter) _renegAnswerWaiter.resolve(false);
+                            }
                             await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
                             const answer = await peerConnection.createAnswer();
                             await peerConnection.setLocalDescription(answer);
@@ -94596,10 +94656,17 @@ const _callSocketHandlers = {};
                     _callSocketHandlers['webrtc-renegotiate-answer'] = (async (payload) => {
                         if (!payload || _fromOtherPeer(payload)) return;
                         if (!peerConnection || !payload.answer) return;
+                        // 自分のOfferを出していない(stable等)ときに届いた古い/重複Answerは無視する
+                        if (peerConnection.signalingState !== 'have-local-offer') {
+                            console.warn('[VC] 再ネゴシエーションAnswerを無視(状態: ' + peerConnection.signalingState + ')');
+                            return;
+                        }
                         try {
                             await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                            if (_renegAnswerWaiter && _renegAnswerWaiter.pc === peerConnection) _renegAnswerWaiter.resolve(true);
                         } catch (e) {
                             console.error('[VC] 再ネゴシエーション(Answer)処理失敗:', e);
+                            if (_renegAnswerWaiter) _renegAnswerWaiter.resolve(false);
                         }
                     });
 
