@@ -94525,7 +94525,9 @@ const _callSocketHandlers = {};
 
                     _callSocketHandlers['webrtc-answer'] = (async (payload) => {
                         if (_fromOtherPeer(payload)) return;
-                        if (peerConnection && !peerConnection.currentRemoteDescription) {
+                        // [FIX] 同じAnswerが二重に届いても1回だけ処理する。await の前に印を付けて、並行処理を防ぐ
+                        if (peerConnection && !peerConnection.currentRemoteDescription && !peerConnection.__answerClaimed) {
+                            peerConnection.__answerClaimed = true;
                             try {
                                 console.log("📬 [発信側] Answerを受信しました。");
                                 await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
@@ -94627,6 +94629,9 @@ const _callSocketHandlers = {};
                     _callSocketHandlers['webrtc-renegotiate-offer'] = (async (payload) => {
                         if (!payload || _fromOtherPeer(payload)) return;
                         if (!peerConnection || !payload.offer) return;
+                        // [FIX] 同じOfferの二重配信を無視する（二重に処理すると二つ目のsetLocalDescriptionが失敗する）
+                        if (peerConnection.__renegOfferClaimed === payload.offer.sdp) return;
+                        peerConnection.__renegOfferClaimed = payload.offer.sdp;
                         if (callState !== 'active' && !(payload.reason === 'ice-restart' && callState === 'calling')) return;
                         if (payload.reason === 'ice-restart' && !(_turnState && _turnState.phase === 'granted')) return; // 同意前のTURN再接続は受け付けない
                         try {
@@ -94657,14 +94662,17 @@ const _callSocketHandlers = {};
                         if (!payload || _fromOtherPeer(payload)) return;
                         if (!peerConnection || !payload.answer) return;
                         // 自分のOfferを出していない(stable等)ときに届いた古い/重複Answerは無視する
-                        if (peerConnection.signalingState !== 'have-local-offer') {
+                        if (peerConnection.signalingState !== 'have-local-offer' || peerConnection.__renegAnswerClaimed) {
                             console.warn('[VC] 再ネゴシエーションAnswerを無視(状態: ' + peerConnection.signalingState + ')');
                             return;
                         }
+                        peerConnection.__renegAnswerClaimed = true; // [FIX] await 前に印を付け、二重処理を防ぐ
                         try {
                             await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                            peerConnection.__renegAnswerClaimed = false;
                             if (_renegAnswerWaiter && _renegAnswerWaiter.pc === peerConnection) _renegAnswerWaiter.resolve(true);
                         } catch (e) {
+                            peerConnection.__renegAnswerClaimed = false;
                             console.error('[VC] 再ネゴシエーション(Answer)処理失敗:', e);
                             if (_renegAnswerWaiter) _renegAnswerWaiter.resolve(false);
                         }
