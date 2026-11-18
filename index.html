@@ -94142,6 +94142,18 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         console.warn(`[startCall] 呼び出し不可: 現在の状態=${callState}`);
                         return;
                     }
+                    const targetPartner = RiviftConnect.activeConversation?.partnerEmail || null;
+                    if (!targetPartner) {
+                        RiviftConnect.showToast('通話相手を選択してください', 'error');
+                        return;
+                    }
+                    if (!RiviftConnect.socket) {
+                        RiviftConnect.connectToServer?.();
+                    }
+                    if (!RiviftConnect.socket) {
+                        RiviftConnect.showToast('サーバーに接続できていません', 'error');
+                        return;
+                    }
 
                     let shareCfg = presetShareConfig;
                     if (callType === 'screen' && !shareCfg) {
@@ -94154,7 +94166,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     callState = 'calling';
                     baseCallType = callType;
                     currentCallType = (callType === 'video' || callType === 'screen') ? 'video' : 'audio';
-                    currentCallPartner = RiviftConnect.activeConversation?.partnerEmail || null;
+                    currentCallPartner = targetPartner;
                     currentCallPartnerName = appWindow?.querySelector('#chat-partner-display-name')?.textContent || '';
                     remoteAudioStream = new MediaStream();
                     remoteScreenStream = new MediaStream();
@@ -94309,7 +94321,19 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 RiviftConnect.socket.emit('webrtc-end-call', { to: partnerEmail });
                                 endCall(false, 'サーバーから応答がありません。通信状況を確認してください');
                             } else if (!res || !res.delivered) {
-                                endCall(false, '相手はオフラインです');
+                                const msg = res?.error === 'forbidden'
+                                    ? '友達ではないため発信できません'
+                                    : (res?.error === 'rate_limited'
+                                        ? '発信の試行が多すぎます。しばらく待ってから再試行してください'
+                                        : '発信に失敗しました');
+                                endCall(false, msg);
+                            } else if (res.recipientOnline === false) {
+                                // 相手が現在オフラインでも発信・呼び出しを継続（呼び出し中に接続すると着信が届く）
+                                manageCallUI(true, callType === 'screen' ? '呼び出し中（相手はオフライン）...' : '呼び出し中（オフライン）...');
+                                const vcStatus = appWindow?.querySelector('#vc-remote-status');
+                                if (vcStatus && callState === 'calling') {
+                                    vcStatus.textContent = '相手は現在オフラインです（呼び出し中...）';
+                                }
                             }
                         });
 
@@ -94476,6 +94500,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     }
 
                     const prevState = callState;
+                    if (window._riviftRingTimer) {
+                        clearTimeout(window._riviftRingTimer);
+                        window._riviftRingTimer = null;
+                    }
                     _clearPcDisconnectTimer();
                     _resetTurnState();
                     _videoUsedInCall = false;
@@ -94854,7 +94882,8 @@ const _callSocketHandlers = {};
                     });
 
                     // 今の通話相手以外から届いた通話イベントは無視する（別の人の終了通知で今の通話が切れるのを防ぐ）
-                    const _fromOtherPeer = (p) => !!(currentCallPartner && p && p.from && p.from !== currentCallPartner);
+                    const _normAddr = (e) => String(e || '').trim().toLowerCase();
+                    const _fromOtherPeer = (p) => !!(currentCallPartner && p && p.from && _normAddr(p.from) !== _normAddr(currentCallPartner));
 
                     _callSocketHandlers['webrtc-answer'] = (async (payload) => {
                         if (_fromOtherPeer(payload)) return;
