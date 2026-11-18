@@ -91253,7 +91253,8 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                 }
 
                 RiviftConnect.renderStampPanel = function () {
-                    const panel = RiviftConnect.DOM.stampPanel;
+                    const panel = RiviftConnect.DOM?.stampPanel;
+                    if (!panel) return;
                     panel.innerHTML = '';
 
                     RiviftConnect.STAMPS.forEach(stampUrl => {
@@ -91741,7 +91742,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             try {
                                 if (el.hasAttribute && el.hasAttribute('data-rivift-ss-ui')) return true;
                                 const nodeName = el.nodeName;
-                                if (nodeName === 'VIDEO') return true;
+                                if (nodeName === 'VIDEO' || nodeName === 'IFRAME') return true;
                                 if (nodeName === 'CANVAS' && !_isCanvasClean(el)) return true;
                                 const id = el.id || '';
                                 if (id === 'local-video-preview' || id === 'a11y-magnifier' || id === 'os-incoming-call-toast') return true;
@@ -91752,13 +91753,23 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             return false;
                         }
 
-                        // 外部サイト(CORS非対応・403等)の画像が混ざると、描画先canvasが汚染されて captureStream が失敗する。
-                        // 汚染された描画結果は使わず、外部画像を取り除いて描き直す。
-                        function _isRemoteUrl(u) {
+                        // file:// 環境や外部サイト(CORS非対応・403等)の画像が混ざると、描画先canvasが汚染されて captureStream が失敗する。
+                        // 汚染リスクのあるURLを判定し、汚染された描画結果は使わず安全な要素だけを描き直す。
+                        function _isTaintRiskUrl(u, strict = false) {
                             try {
-                                const x = new URL(u, location.href);
-                                return (x.protocol === 'http:' || x.protocol === 'https:') && x.origin !== location.origin;
-                            } catch (_) { return false; }
+                                if (!u || typeof u !== 'string') return false;
+                                const s = u.trim();
+                                if (!s) return false;
+                                if (/^(?:data:|blob:|about:|#)/i.test(s)) {
+                                    if (strict && /^data:image\/svg\+xml/i.test(s) && /foreignObject/i.test(s)) return true;
+                                    return false;
+                                }
+                                const x = new URL(s, location.href);
+                                // file:// の画像は Chromium で必ず canvas を汚染する
+                                if (x.protocol === 'file:' || location.protocol === 'file:') return true;
+                                if ((x.protocol === 'http:' || x.protocol === 'https:') && (strict || x.origin !== location.origin)) return true;
+                                return false;
+                            } catch (_) { return strict; }
                         }
                         function _isCanvasClean(c) {
                             try { c.getContext('2d').getImageData(0, 0, 1, 1); return true; } catch (_) { return false; }
@@ -91848,7 +91859,18 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             return out;
                         }
 
+                        function _sanitizeCssUrlsInText(cssText, strict) {
+                            if (!cssText || cssText.indexOf('url(') < 0) return cssText;
+                            return cssText.replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full, q, rawUrl) => {
+                                const u = (rawUrl || '').trim();
+                                if (!u || /\.(?:woff2?|ttf|otf|eot)(?:[?#]|$)/i.test(u)) return full;
+                                if (_isTaintRiskUrl(u, strict)) return `url("${_BLANK_GIF}")`;
+                                return full;
+                            });
+                        }
+
                         function _makeSanitizer(level) {
+                            const strict = level >= 2;
                             return function (doc) {
                                 try {
                                     const view = doc.defaultView;
@@ -91857,9 +91879,17 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     // html2canvas@1.4.1 は color-mix / color(srgb ...) / oklch / oklab 等で例外を投げるため常に置換する
                                     doc.querySelectorAll('style').forEach(stEl => {
                                         try {
-                                            if (stEl.textContent && _UNSUPPORTED_COLOR_HAS_RE.test(stEl.textContent)) {
-                                                stEl.textContent = _sanitizeCssColors(stEl.textContent, rootStyle);
+                                            let txt = stEl.textContent || '';
+                                            let changed = false;
+                                            if (txt && _UNSUPPORTED_COLOR_HAS_RE.test(txt)) {
+                                                txt = _sanitizeCssColors(txt, rootStyle);
+                                                changed = true;
                                             }
+                                            if (level >= 1 && txt && txt.indexOf('url(') >= 0) {
+                                                const next = _sanitizeCssUrlsInText(txt, strict);
+                                                if (next !== txt) { txt = next; changed = true; }
+                                            }
+                                            if (changed) stEl.textContent = txt;
                                         } catch (_) {}
                                     });
                                     doc.querySelectorAll('[style]').forEach(el => {
@@ -91871,7 +91901,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                         } catch (_) {}
                                     });
                                     if (view) {
-                                        const colorProps = ['color', 'background-color', 'background-image', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow', 'text-shadow'];
+                                        const colorProps = ['color', 'background-color', 'background-image', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow', 'text-shadow', 'fill', 'stroke', 'caret-color', 'text-decoration-color', 'column-rule-color'];
                                         doc.querySelectorAll('*').forEach(el => {
                                             try {
                                                 const cs = view.getComputedStyle(el);
@@ -91889,31 +91919,93 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     if (level >= 1) {
                                         doc.querySelectorAll('img').forEach(im => {
                                             const src = im.currentSrc || im.getAttribute('src') || '';
-                                            if (src && _isRemoteUrl(src)) { im.removeAttribute('srcset'); im.setAttribute('src', _BLANK_GIF); }
+                                            if (src && _isTaintRiskUrl(src, strict)) {
+                                                im.removeAttribute('srcset');
+                                                im.removeAttribute('crossorigin');
+                                                im.setAttribute('src', _BLANK_GIF);
+                                            }
                                         });
                                         doc.querySelectorAll('image').forEach(im => {
                                             const h = im.getAttribute('href') || im.getAttribute('xlink:href') || '';
-                                            if (h && _isRemoteUrl(h)) { im.removeAttribute('href'); im.removeAttribute('xlink:href'); }
-                                        });
-                                        const hasRemote = (v) => {
-                                            if (!v || v === 'none' || v.indexOf('url(') < 0) return false;
-                                            const re = /url\((['"]?)(.*?)\1\)/g; let m;
-                                            while ((m = re.exec(v))) { if (_isRemoteUrl(m[2])) return true; }
-                                            return false;
-                                        };
-                                        const targets = level >= 2 ? doc.querySelectorAll('*') : doc.querySelectorAll('[style*="url("]');
-                                        targets.forEach(el => {
-                                            const cs = level >= 2 && view ? view.getComputedStyle(el) : el.style;
-                                            if (hasRemote(cs.backgroundImage)) el.style.setProperty('background-image', 'none', 'important');
-                                            if (hasRemote(cs.maskImage) || hasRemote(cs.webkitMaskImage)) {
-                                                el.style.setProperty('mask-image', 'none', 'important');
-                                                el.style.setProperty('-webkit-mask-image', 'none', 'important');
+                                            if (h && _isTaintRiskUrl(h, strict)) {
+                                                im.removeAttribute('href');
+                                                im.removeAttribute('xlink:href');
                                             }
-                                            if (hasRemote(cs.borderImageSource)) el.style.setProperty('border-image', 'none', 'important');
+                                        });
+                                        const replaceRiskUrls = (v) => {
+                                            if (!v || v === 'none' || v.indexOf('url(') < 0) return null;
+                                            let hit = false;
+                                            const next = v.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (full, q, inner) => {
+                                                if (_isTaintRiskUrl(inner, strict)) {
+                                                    hit = true;
+                                                    return 'none';
+                                                }
+                                                return full;
+                                            });
+                                            return hit ? next : null;
+                                        };
+                                        doc.querySelectorAll('*').forEach(el => {
+                                            try {
+                                                const cs = view ? view.getComputedStyle(el) : el.style;
+                                                const bgRepl = replaceRiskUrls(cs.backgroundImage);
+                                                if (bgRepl !== null) el.style.setProperty('background-image', bgRepl, 'important');
+                                                if (replaceRiskUrls(cs.maskImage) !== null || replaceRiskUrls(cs.webkitMaskImage) !== null) {
+                                                    el.style.setProperty('mask-image', 'none', 'important');
+                                                    el.style.setProperty('-webkit-mask-image', 'none', 'important');
+                                                }
+                                                if (replaceRiskUrls(cs.borderImageSource) !== null) {
+                                                    el.style.setProperty('border-image', 'none', 'important');
+                                                }
+                                                if (replaceRiskUrls(cs.listStyleImage) !== null) {
+                                                    el.style.setProperty('list-style-image', 'none', 'important');
+                                                }
+                                            } catch (_) {}
+                                        });
+                                    }
+
+                                    if (strict) {
+                                        doc.querySelectorAll('foreignObject').forEach(fo => {
+                                            try { fo.remove(); } catch (_) {}
+                                        });
+                                        doc.querySelectorAll('canvas').forEach(cv => {
+                                            try {
+                                                if (!_isCanvasClean(cv)) cv.remove();
+                                            } catch (_) {
+                                                try { cv.remove(); } catch (__) {}
+                                            }
                                         });
                                     }
                                 } catch (_) { }
                             };
+                        }
+
+                        function _drawFallbackFrame(st, statusText = 'Rivift OS 画面共有中') {
+                            if (!st) return;
+                            try {
+                                const cw = st.canvas.width;
+                                const ch = st.canvas.height;
+                                const ctx = st.ctx;
+                                const grad = ctx.createLinearGradient(0, 0, cw, ch);
+                                grad.addColorStop(0, '#0f172a');
+                                grad.addColorStop(1, '#1e293b');
+                                ctx.fillStyle = grad;
+                                ctx.fillRect(0, 0, cw, ch);
+                                ctx.fillStyle = 'rgba(255,255,255,0.92)';
+                                ctx.font = '600 22px sans-serif';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(statusText, cw / 2, ch / 2 - 8);
+                                ctx.fillStyle = 'rgba(148,163,184,0.85)';
+                                ctx.font = '14px sans-serif';
+                                ctx.fillText('ブラウザのセキュリティ制限により画像を簡易表示しています', cw / 2, ch / 2 + 22);
+                                if (!st.lastFrameCanvas) st.lastFrameCanvas = document.createElement('canvas');
+                                st.lastFrameCanvas.width = cw;
+                                st.lastFrameCanvas.height = ch;
+                                st.lastFrameCanvas.getContext('2d', { alpha: false }).drawImage(st.canvas, 0, 0);
+                                st.lastDrawAt = Date.now();
+                                if (st.videoTrack && typeof st.videoTrack.requestFrame === 'function') {
+                                    st.videoTrack.requestFrame();
+                                }
+                            } catch (_) {}
                         }
 
                         function _pushCanvasFrame(st) {
@@ -91996,16 +92088,25 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                                 const _render = () => Promise.race([
                                     window.html2canvas(targetEl, opts),
-                                    new Promise((_, rej) => setTimeout(() => rej(new Error('capture_timeout')), 5000))
+                                    new Promise((_, rej) => setTimeout(() => rej(new Error('capture_timeout')), 6500))
                                 ]);
                                 let rendered = await _render();
-                                // 汚染されていたら、外部画像を除去して描き直す（それでもダメなら全要素を検査）
+                                // 汚染されていたら、外部/file://画像を除去して描き直す（それでもダメなら厳格検査）
                                 while (rendered && !_isCanvasClean(rendered) && (st.sanitize || 0) < 2) {
                                     st.sanitize = (st.sanitize || 0) + 1;
                                     opts.onclone = _makeSanitizer(st.sanitize);
                                     rendered = await _render();
                                 }
-                                if (!st.running || !rendered || !_isCanvasClean(rendered)) return; // 共有用canvasは汚染させない
+                                if (!st.running) return;
+                                if (!rendered || !_isCanvasClean(rendered)) {
+                                    if (!st._lastErrLogAt || Date.now() - st._lastErrLogAt > 5000) {
+                                        st._lastErrLogAt = Date.now();
+                                        console.warn('[RiviftOSScreenCapture] 描画canvasが汚染または取得不可のためフォールバックを使用します (sanitize=' + (st.sanitize || 0) + ')');
+                                    }
+                                    if (st.lastFrameCanvas) _pushCanvasFrame(st);
+                                    else _drawFallbackFrame(st);
+                                    return;
+                                }
 
                                 const cw = st.canvas.width;
                                 const ch = st.canvas.height;
@@ -92036,7 +92137,8 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     st._lastErrLogAt = Date.now();
                                     console.warn('[RiviftOSScreenCapture] フレーム取得エラー:', e);
                                 }
-                                _pushCanvasFrame(st);
+                                if (st.lastFrameCanvas) _pushCanvasFrame(st);
+                                else _drawFallbackFrame(st);
                             } finally {
                                 st.busy = false;
                                 if (st.running) {
@@ -92098,7 +92200,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 busy: false,
                                 timer: null,
                                 keepAliveTimer: null,
-                                sanitize: 0,
+                                sanitize: location.protocol === 'file:' ? 1 : 0,
                                 config: cfg,
                                 canvas,
                                 ctx,
@@ -92129,10 +92231,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             _pushCanvasFrame(st);
                             st.keepAliveTimer = setInterval(() => {
                                 if (!st.running) return;
-                                if (Date.now() - (st.lastDrawAt || 0) >= 380) {
+                                if (Date.now() - (st.lastDrawAt || 0) >= 340) {
                                     _pushCanvasFrame(st);
                                 }
-                            }, 400);
+                            }, 350);
 
                             if (cfg.sendOsAudio) {
                                 const osAudioTrack = startAudioCapture();
@@ -93237,7 +93339,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         const t = r.track;
                         if (!t || t.readyState === 'ended') return;
                         const tr = transceivers.find(x => x.receiver === r);
-                        if (tr && (tr.currentDirection === 'inactive' || tr.currentDirection === 'stopped' || tr.direction === 'inactive' || tr.direction === 'stopped')) {
+                        if (tr && (tr.direction === 'inactive' || tr.direction === 'stopped' || tr.currentDirection === 'stopped' || (tr.currentDirection === 'inactive' && tr.direction !== 'recvonly' && tr.direction !== 'sendrecv'))) {
                             return;
                         }
                         if (t.kind === 'audio') {
@@ -93410,8 +93512,9 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                         if (hasLiveRemoteScreen) {
                             if (remoteVideo) {
-                                if (remoteVideo.srcObject !== remoteScreenStream || screenChanged) {
-                                    if (remoteVideo.srcObject === remoteScreenStream && screenChanged) {
+                                const needRebind = remoteVideo.srcObject !== remoteScreenStream || screenChanged || (remoteVideo.videoWidth === 0 && remoteScreenStream.getVideoTracks().some(t => !t.muted));
+                                if (needRebind) {
+                                    if (remoteVideo.srcObject === remoteScreenStream) {
                                         remoteVideo.srcObject = null;
                                     }
                                     remoteVideo.srcObject = remoteScreenStream;
@@ -93532,6 +93635,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             const mid = _getSenderMid(screenSender);
                             if (mid) renegPayload.screenMid = mid;
                             renegPayload.hasCamera = !!isCameraEnabled;
+                            if (reason === 'screen') _emitScreenShareStatus(true);
                         }
                         RiviftConnect.socket.emit('webrtc-renegotiate-offer', renegPayload);
                         await answered; // Answerが来る(またはタイムアウト)まで次へ進まない
@@ -94890,7 +94994,7 @@ const _callSocketHandlers = {};
                                 to: payload.from,
                                 answer: peerConnection.localDescription
                             });
-                            if (payload.isScreenSharing) _syncScreenShareUI();
+                            _syncScreenShareUI();
                         } catch (e) {
                             console.error('[VC] 再ネゴシエーション(Offer)処理失敗:', e);
                         }
@@ -95148,13 +95252,15 @@ RiviftConnect.connectToServer = function () {
                 }
 
                 let isRegisterMode = false;
-                RiviftConnect.DOM.authToggleLink.onclick = (e) => { e.preventDefault(); isRegisterMode = !isRegisterMode; RiviftConnect.DOM.authDisplayName.classList.toggle('hidden', !isRegisterMode); RiviftConnect.DOM.authPasswordConfirm.classList.toggle('hidden', !isRegisterMode); RiviftConnect.DOM.authBtn.innerText = isRegisterMode ? '新規作成' : 'ログイン'; RiviftConnect.DOM.authToggleLink.innerText = isRegisterMode ? 'ログイン画面へ' : 'アカウントを新規作成'; };
+                if (RiviftConnect.DOM.authToggleLink) {
+                    RiviftConnect.DOM.authToggleLink.onclick = (e) => { e.preventDefault(); isRegisterMode = !isRegisterMode; RiviftConnect.DOM.authDisplayName.classList.toggle('hidden', !isRegisterMode); RiviftConnect.DOM.authPasswordConfirm.classList.toggle('hidden', !isRegisterMode); RiviftConnect.DOM.authBtn.innerText = isRegisterMode ? '新規作成' : 'ログイン'; RiviftConnect.DOM.authToggleLink.innerText = isRegisterMode ? 'ログイン画面へ' : 'アカウントを新規作成'; };
+                }
 
                 let _authAttempts = 0;
                 let _authLockUntil = 0;
                 const _AUTH_MAX = 5, _AUTH_LOCKOUT_MS = 30000;
 
-                RiviftConnect.DOM.authForm.onsubmit = async (e) => {
+                if (RiviftConnect.DOM.authForm) RiviftConnect.DOM.authForm.onsubmit = async (e) => {
                     e.preventDefault();
                     const email = RiviftConnect.DOM.authEmail.value;
                     const password = RiviftConnect.DOM.authPassword.value;
@@ -95260,7 +95366,7 @@ RiviftConnect.connectToServer = function () {
                 };
 
                 RiviftConnect.renderContactList = async function (preloadedSidebarData = null) {
-                    if (!RiviftConnect.currentUser?.friends) {
+                    if (!RiviftConnect.currentUser?.friends || !RiviftConnect.DOM?.contactList) {
                         return;
                     }
 
@@ -95301,6 +95407,7 @@ RiviftConnect.connectToServer = function () {
                 };
 
                 RiviftConnect.renderFriendRequests = async function (preloadedUsersData = null) {
+                    if (!RiviftConnect.DOM?.requestsBadge || !RiviftConnect.DOM?.requestList) return;
                     const requests = RiviftConnect.currentUser.requests || [];
                     RiviftConnect.DOM.requestsBadge.classList.toggle('visible', requests.length > 0);
                     RiviftConnect.DOM.requestsBadge.innerText = requests.length || '';
@@ -95374,6 +95481,7 @@ RiviftConnect.connectToServer = function () {
                 };
 
                 RiviftConnect.renderSentRequests = async function (preloadedUsersData = null) {
+                    if (!RiviftConnect.DOM?.sentRequestList) return;
                     const sentRequests = RiviftConnect.currentUser.sentRequests || [];
                     RiviftConnect.DOM.sentRequestList.innerHTML = '';
                     if (sentRequests.length > 0) {
@@ -96842,6 +96950,7 @@ RiviftConnect.connectToServer = function () {
                 };
 
                 RiviftConnect.initializeAppUI = function () {
+                     if (!RiviftConnect.isWindowOpen || !RiviftConnect.DOM?.currentUserDisplayName || !RiviftConnect.DOM?.currentUserIcon) return;
                      RiviftConnect.DOM.currentUserDisplayName.innerText = RiviftConnect.currentUser.displayName;
                      RiviftConnect.DOM.currentUserIcon.style.backgroundImage = `url(${RiviftConnect.currentUser.icon || ''})`;
                      RiviftConnect.renderAllSidebars();
@@ -97110,76 +97219,96 @@ RiviftConnect.connectToServer = function () {
                     }
                 }
 
-                RiviftConnect.DOM.contactList.removeEventListener('click', handleContactListClick);
-                RiviftConnect.DOM.contactList.addEventListener('click', handleContactListClick);
+                if (RiviftConnect.DOM.contactList) {
+                    RiviftConnect.DOM.contactList.removeEventListener('click', handleContactListClick);
+                    RiviftConnect.DOM.contactList.addEventListener('click', handleContactListClick);
+                }
 
-                RiviftConnect.DOM.addFriendBtn.removeEventListener('click', handleAddFriend);
-                RiviftConnect.DOM.addFriendBtn.addEventListener('click', handleAddFriend);
+                if (RiviftConnect.DOM.addFriendBtn) {
+                    RiviftConnect.DOM.addFriendBtn.removeEventListener('click', handleAddFriend);
+                    RiviftConnect.DOM.addFriendBtn.addEventListener('click', handleAddFriend);
+                }
 
-                RiviftConnect.DOM.newMailBtn.removeEventListener('click', handleNewMail);
-                RiviftConnect.DOM.newMailBtn.addEventListener('click', handleNewMail);
+                if (RiviftConnect.DOM.newMailBtn) {
+                    RiviftConnect.DOM.newMailBtn.removeEventListener('click', handleNewMail);
+                    RiviftConnect.DOM.newMailBtn.addEventListener('click', handleNewMail);
+                }
 
-                RiviftConnect.DOM.messageForm.onsubmit = (e) => { e.preventDefault(); RiviftConnect.sendMessage('text', RiviftConnect.DOM.messageInput.value); };
+                if (RiviftConnect.DOM.messageForm) {
+                    RiviftConnect.DOM.messageForm.onsubmit = (e) => { e.preventDefault(); RiviftConnect.sendMessage('text', RiviftConnect.DOM.messageInput.value); };
+                }
 
-                RiviftConnect.DOM.messageInput.addEventListener('input', () => {
-                    if (RiviftConnect.DOM.messageInput.value.trim()) {
-                        RiviftConnect._startTyping();
-                    } else {
-                        RiviftConnect._stopTyping();
-                    }
-                });
-                RiviftConnect.DOM.stampBtn.onclick = () => RiviftConnect.DOM.stampPanel.classList.toggle('hidden');
-                RiviftConnect.DOM.logoutBtn.onclick = async () => {
-                    if (RiviftConnect.socket) RiviftConnect.socket.disconnect();
-                    await RiviftConnect.clearSession();
-                    localStorage.removeItem('rivift_auth_token');
-                    RiviftConnect._authToken = null;
-                    RiviftConnect.currentUser = null;
-                    RiviftConnect.activeConversation = null;
-                    RiviftConnect.switchView('auth-view');
-                    RiviftConnect.DOM.authEmail.value = '';
-                    RiviftConnect.DOM.authPassword.value = '';
-                };
+                if (RiviftConnect.DOM.messageInput) {
+                    RiviftConnect.DOM.messageInput.addEventListener('input', () => {
+                        if (RiviftConnect.DOM.messageInput.value.trim()) {
+                            RiviftConnect._startTyping();
+                        } else {
+                            RiviftConnect._stopTyping();
+                        }
+                    });
+                }
+                if (RiviftConnect.DOM.stampBtn) {
+                    RiviftConnect.DOM.stampBtn.onclick = () => RiviftConnect.DOM.stampPanel?.classList.toggle('hidden');
+                }
+                if (RiviftConnect.DOM.logoutBtn) {
+                    RiviftConnect.DOM.logoutBtn.onclick = async () => {
+                        if (RiviftConnect.socket) RiviftConnect.socket.disconnect();
+                        await RiviftConnect.clearSession();
+                        localStorage.removeItem('rivift_auth_token');
+                        RiviftConnect._authToken = null;
+                        RiviftConnect.currentUser = null;
+                        RiviftConnect.activeConversation = null;
+                        RiviftConnect.switchView('auth-view');
+                        if (RiviftConnect.DOM.authEmail) RiviftConnect.DOM.authEmail.value = '';
+                        if (RiviftConnect.DOM.authPassword) RiviftConnect.DOM.authPassword.value = '';
+                    };
+                }
                 RiviftConnect.renderStampPanel();
 
-                RiviftConnect.tryAutoLogin();
+                if (!RiviftConnect.currentUser) {
+                    RiviftConnect.tryAutoLogin();
+                }
 
-                RiviftConnect.DOM.attachmentBtn.onclick = async () => {
-                    const filePath = await showFilePicker({ mode: 'open', title: '送信するファイルを選択' });
-                    if (filePath) {
-                        try {
-                            const fileData = await VFS.readFile(filePath);
-                            if (fileData) {
-                                RiviftConnect.sendMessage('file', {
-                                    name: fileData.name,
-                                    type: fileData.type,
-                                    dataUrl: fileData.content
-                                });
+                if (RiviftConnect.DOM.attachmentBtn) {
+                    RiviftConnect.DOM.attachmentBtn.onclick = async () => {
+                        const filePath = await showFilePicker({ mode: 'open', title: '送信するファイルを選択' });
+                        if (filePath) {
+                            try {
+                                const fileData = await VFS.readFile(filePath);
+                                if (fileData) {
+                                    RiviftConnect.sendMessage('file', {
+                                        name: fileData.name,
+                                        type: fileData.type,
+                                        dataUrl: fileData.content
+                                    });
+                                }
+                            } catch (err) {
+                                createNotification('エラー', `ファイルの読み込みに失敗: ${err.message}`, 'error');
                             }
-                        } catch (err) {
-                            createNotification('エラー', `ファイルの読み込みに失敗: ${err.message}`, 'error');
                         }
-                    }
-                };
+                    };
+                }
 
-                RiviftConnect.DOM.fileUploadInput.onchange = async (e) => {
-                    if (e.target.files && e.target.files[0]) {
-                        const file = e.target.files[0];
+                if (RiviftConnect.DOM.fileUploadInput) {
+                    RiviftConnect.DOM.fileUploadInput.onchange = async (e) => {
+                        if (e.target.files && e.target.files[0]) {
+                            const file = e.target.files[0];
 
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                            const isImage = typeof file.type === 'string' && file.type.startsWith('image/');
-                            RiviftConnect.sendMessage(isImage ? 'image' : 'file', {
-                                name: file.name,
-                                type: file.type,
-                                dataUrl: event.target.result // これがBase64エンコードされたファイル本体
-                            });
-                        };
-                        reader.readAsDataURL(file);
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                const isImage = typeof file.type === 'string' && file.type.startsWith('image/');
+                                RiviftConnect.sendMessage(isImage ? 'image' : 'file', {
+                                    name: file.name,
+                                    type: file.type,
+                                    dataUrl: event.target.result // これがBase64エンコードされたファイル本体
+                                });
+                            };
+                            reader.readAsDataURL(file);
 
-                        e.target.value = null; // 同じファイルを選択できるようにリセット
-                    }
-                };
+                            e.target.value = null; // 同じファイルを選択できるようにリセット
+                        }
+                    };
+                }
 
                 function setupDragAndDropForChat(targetWin) {
                     if (!targetWin) return;
