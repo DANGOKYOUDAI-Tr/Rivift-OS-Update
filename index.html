@@ -91749,6 +91749,50 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             return false;
                         }
 
+                        // 外部サイト(CORS非対応・403等)の画像が混ざると、描画先canvasが汚染されて captureStream が失敗する。
+                        // 汚染された描画結果は使わず、外部画像を取り除いて描き直す。
+                        function _isRemoteUrl(u) {
+                            try {
+                                const x = new URL(u, location.href);
+                                return (x.protocol === 'http:' || x.protocol === 'https:') && x.origin !== location.origin;
+                            } catch (_) { return false; }
+                        }
+                        function _isCanvasClean(c) {
+                            try { c.getContext('2d').getImageData(0, 0, 1, 1); return true; } catch (_) { return false; }
+                        }
+                        const _BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+                        function _makeSanitizer(level) {
+                            return function (doc) {
+                                try {
+                                    doc.querySelectorAll('img').forEach(im => {
+                                        const src = im.currentSrc || im.getAttribute('src') || '';
+                                        if (src && _isRemoteUrl(src)) { im.removeAttribute('srcset'); im.setAttribute('src', _BLANK_GIF); }
+                                    });
+                                    doc.querySelectorAll('image').forEach(im => {
+                                        const h = im.getAttribute('href') || im.getAttribute('xlink:href') || '';
+                                        if (h && _isRemoteUrl(h)) { im.removeAttribute('href'); im.removeAttribute('xlink:href'); }
+                                    });
+                                    const hasRemote = (v) => {
+                                        if (!v || v === 'none' || v.indexOf('url(') < 0) return false;
+                                        const re = /url\((['"]?)(.*?)\1\)/g; let m;
+                                        while ((m = re.exec(v))) { if (_isRemoteUrl(m[2])) return true; }
+                                        return false;
+                                    };
+                                    const targets = level >= 2 ? doc.querySelectorAll('*') : doc.querySelectorAll('[style*="url("]');
+                                    const view = doc.defaultView;
+                                    targets.forEach(el => {
+                                        const cs = level >= 2 && view ? view.getComputedStyle(el) : el.style;
+                                        if (hasRemote(cs.backgroundImage)) el.style.setProperty('background-image', 'none', 'important');
+                                        if (hasRemote(cs.maskImage) || hasRemote(cs.webkitMaskImage)) {
+                                            el.style.setProperty('mask-image', 'none', 'important');
+                                            el.style.setProperty('-webkit-mask-image', 'none', 'important');
+                                        }
+                                        if (hasRemote(cs.borderImageSource)) el.style.setProperty('border-image', 'none', 'important');
+                                    });
+                                } catch (_) { }
+                            };
+                        }
+
                         async function _captureOneFrame(st) {
                             if (!st || !st.running || st.busy) return;
                             if (typeof window.html2canvas !== 'function') return;
@@ -91813,11 +91857,19 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     opts.windowHeight = vh;
                                 }
 
-                                const rendered = await Promise.race([
+                                const _render = () => Promise.race([
                                     window.html2canvas(targetEl, opts),
                                     new Promise((_, rej) => setTimeout(() => rej(new Error('capture_timeout')), 5000))
                                 ]);
-                                if (!st.running || !rendered) return;
+                                if (st.sanitize) opts.onclone = _makeSanitizer(st.sanitize);
+                                let rendered = await _render();
+                                // 汚染されていたら、外部画像を除去して描き直す（それでもダメなら全要素を検査）
+                                while (rendered && !_isCanvasClean(rendered) && (st.sanitize || 0) < 2) {
+                                    st.sanitize = (st.sanitize || 0) + 1;
+                                    opts.onclone = _makeSanitizer(st.sanitize);
+                                    rendered = await _render();
+                                }
+                                if (!st.running || !rendered || !_isCanvasClean(rendered)) return; // 共有用canvasは汚染させない
 
                                 const cw = st.canvas.width;
                                 const ch = st.canvas.height;
@@ -93866,10 +93918,16 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             if (currentShareConfig?.mode) offerPayload.screenMode = currentShareConfig.mode;
                         }
 
-                        RiviftConnect.socket.timeout(8000).emit('webrtc-offer', offerPayload, (err, res) => {
+                        RiviftConnect.socket.timeout(15000).emit('webrtc-offer', offerPayload, (err, res) => {
                             if (callState !== 'calling') return;
-                            if (err) endCall(false, 'サーバーから応答がありません。通信状況を確認してください');
-                            else if (!res || !res.delivered) endCall(false, '相手はオフラインです');
+                            if (err) {
+                                // サーバーの応答が遅れただけで、Offerは相手に届いている可能性がある。
+                                // 取り消しを送らないと相手側に「着信中」が残り、次の発信が「別の着信があります」で拒否される。
+                                RiviftConnect.socket.emit('webrtc-end-call', { to: partnerEmail });
+                                endCall(false, 'サーバーから応答がありません。通信状況を確認してください');
+                            } else if (!res || !res.delivered) {
+                                endCall(false, '相手はオフラインです');
+                            }
                         });
 
                         clearTimeout(window._riviftRingTimer);
@@ -94319,16 +94377,23 @@ const _callSocketHandlers = {};
                             }
                         }
 
-                        if (callState === 'active') {
+                        // [FIX] 同じ相手から着信中に同じOfferが重複して届いても「通話中」を返さない
+                        // （返すと、発信側だけが切断され、こちらには着信が残ってしまう）
+                        if (callState === 'incoming' && payload.from === currentCallPartner) {
+                            if (incomingCallPayload?.offer?.sdp === payload.offer?.sdp) {
+                                console.warn('📞 [着信側] 同じOfferの重複を無視しました');
+                                return;
+                            }
+                            console.warn('📞 [着信側] 同じ相手からの掛け直しのため、新しい着信に置き換えます');
+                        } else if (callState === 'active') {
                             console.warn("📞 [着信側] 既に通話中のため、着信を拒否します。");
                             RiviftConnect.socket.emit('webrtc-busy', { to: payload.from });
                             return;
-                        }
-
-                        if (callState === 'incoming') {
-                            console.warn("📞 [着信側] 既に別の着信があります。");
-                            RiviftConnect.socket.emit('webrtc-busy', { to: payload.from });
-                            return;
+                        } else if (callState === 'incoming') {
+                            // 通話は始まっていない未応答の着信（発信側が取り消せずに残ったもの）なので、新しい着信で置き換える。
+                            // busy を返すと、発信側の新しい通話まで切れてしまう。
+                            console.warn("📞 [着信側] 未応答の古い着信を新しい着信で置き換えます。");
+                            endCall(false, '');
                         }
 
                         callState = 'incoming';
