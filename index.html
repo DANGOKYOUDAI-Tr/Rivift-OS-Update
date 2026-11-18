@@ -94834,9 +94834,14 @@ RiviftConnect.connectToServer = function () {
                     });
 
                     // 通話イベントは _callApi.handlers（最初の1セット）へ委譲
+                    // [FIX] この登録処理は画面を開くたびに走り、同じイベントのリスナーが重複していた。
+                    // 1つのソケットにつき1回だけ登録する（重複するとAnswerやOfferが二重処理される）
+                    if (!RiviftConnect.socket._callEventsBound) {
+                    RiviftConnect.socket._callEventsBound = true;
                     ['webrtc-offer','webrtc-answer','webrtc-ice-candidate','webrtc-end-call','webrtc-glare-resolve','webrtc-busy','mute_status_changed','camera_status_changed','screen_share_status_changed','webrtc-renegotiate-offer','webrtc-renegotiate-answer','webrtc-reject-call','webrtc-turn-confirm-request','webrtc-turn-confirm-response'].forEach(_ev => {
                         RiviftConnect.socket.on(_ev, (...args) => RiviftConnect._callApi.handlers[_ev](...args));
                     });
+                    }
 
                     RiviftConnect.socket.on('friend_status_changed', (data) => {
                         const { email, isOnline } = data;
