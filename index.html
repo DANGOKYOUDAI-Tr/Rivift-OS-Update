@@ -92041,6 +92041,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     onclone: _makeSanitizer(st.sanitize || 0),
                                 };
 
+                                const maxW = st.slowDowngrade ? 1280 : 1920;
+                                const maxH = st.slowDowngrade ? 720 : 1080;
+                                const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
+
                                 if (st.config.mode === 'window') {
                                     const winEl = st.config.windowId ? document.getElementById(st.config.windowId) : null;
                                     if (!winEl || !document.body.contains(winEl)) {
@@ -92051,8 +92055,9 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     if (r.width < 10 || r.height < 10) return;
                                     targetEl = winEl;
                                     srcRect = { x: r.left, y: r.top, width: r.width, height: r.height };
-                                    const fitScale = Math.min(1, 1280 / Math.max(1, r.width), 720 / Math.max(1, r.height));
-                                    opts.scale = Math.max(0.45, fitScale);
+                                    const idealScale = r.width < 960 ? dpr : 1;
+                                    const fitScale = Math.min(idealScale, maxW / Math.max(1, r.width), maxH / Math.max(1, r.height));
+                                    opts.scale = Math.max(0.5, fitScale);
                                     opts.width = Math.round(r.width);
                                     opts.height = Math.round(r.height);
                                 } else if (st.config.mode === 'region' && st.config.region) {
@@ -92062,8 +92067,9 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     const rw = Math.max(64, Math.min(window.innerWidth - rx, Math.round(rg.width)));
                                     const rh = Math.max(64, Math.min(window.innerHeight - ry, Math.round(rg.height)));
                                     srcRect = { x: rx, y: ry, width: rw, height: rh };
-                                    const fitScale = Math.min(1, 1280 / rw, 720 / rh);
-                                    opts.scale = Math.max(0.45, fitScale);
+                                    const idealScale = rw < 960 ? dpr : 1;
+                                    const fitScale = Math.min(idealScale, maxW / rw, maxH / rh);
+                                    opts.scale = Math.max(0.5, fitScale);
                                     opts.x = rx;
                                     opts.y = ry;
                                     opts.width = rw;
@@ -92076,8 +92082,8 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     const vw = Math.max(320, window.innerWidth);
                                     const vh = Math.max(240, window.innerHeight);
                                     srcRect = { x: 0, y: 0, width: vw, height: vh };
-                                    const fitScale = Math.min(0.85, 1280 / vw, 720 / vh);
-                                    opts.scale = Math.max(0.4, fitScale);
+                                    const fitScale = Math.min(1, maxW / vw, maxH / vh);
+                                    opts.scale = Math.max(0.5, fitScale);
                                     opts.x = 0;
                                     opts.y = 0;
                                     opts.width = vw;
@@ -92115,10 +92121,12 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 st.ctx.fillStyle = '#0e1118';
                                 st.ctx.fillRect(0, 0, cw, ch);
                                 const scale = Math.min(cw / Math.max(1, rendered.width), ch / Math.max(1, rendered.height));
-                                const dw = rendered.width * scale;
-                                const dh = rendered.height * scale;
-                                const dx = (cw - dw) / 2;
-                                const dy = (ch - dh) / 2;
+                                const dw = Math.round(rendered.width * scale);
+                                const dh = Math.round(rendered.height * scale);
+                                const dx = Math.round((cw - dw) / 2);
+                                const dy = Math.round((ch - dh) / 2);
+                                st.ctx.imageSmoothingEnabled = true;
+                                st.ctx.imageSmoothingQuality = 'high';
                                 st.ctx.drawImage(rendered, dx, dy, dw, dh);
                                 _drawCursor(st.ctx, dw, dh, srcRect);
 
@@ -92145,7 +92153,11 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 st.busy = false;
                                 if (st.running) {
                                     const elapsed = performance.now() - t0;
-                                    const waitMs = Math.max(90, Math.min(350, 160 - elapsed + 70));
+                                    if (!st.slowDowngrade) {
+                                        st.slowStreak = elapsed > 1100 ? (st.slowStreak || 0) + 1 : 0;
+                                        if (st.slowStreak >= 3) st.slowDowngrade = true;
+                                    }
+                                    const waitMs = Math.max(70, Math.min(320, 140 - elapsed + 60));
                                     st.timer = setTimeout(() => _captureOneFrame(st), waitMs);
                                 }
                             }
@@ -92154,17 +92166,24 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         function _computeCanvasDims(config) {
                             let rw = window.innerWidth;
                             let rh = window.innerHeight;
+                            let allowUpscale = 1;
+                            const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
                             if (config.mode === 'window' && config.windowId) {
                                 const el = document.getElementById(config.windowId);
                                 if (el) {
                                     const rect = el.getBoundingClientRect();
-                                    if (rect.width >= 64 && rect.height >= 64) { rw = rect.width; rh = rect.height; }
+                                    if (rect.width >= 64 && rect.height >= 64) {
+                                        rw = rect.width;
+                                        rh = rect.height;
+                                        if (rw < 960) allowUpscale = dpr;
+                                    }
                                 }
                             } else if (config.mode === 'region' && config.region) {
                                 rw = Math.max(64, config.region.width);
                                 rh = Math.max(64, config.region.height);
+                                if (rw < 960) allowUpscale = dpr;
                             }
-                            const ratio = Math.min(1, 1280 / Math.max(1, rw), 720 / Math.max(1, rh));
+                            const ratio = Math.min(allowUpscale, 1920 / Math.max(1, rw), 1080 / Math.max(1, rh));
                             const w = Math.max(64, Math.round(rw * ratio) & ~1);
                             const h = Math.max(64, Math.round(rh * ratio) & ~1);
                             return { w, h };
@@ -92226,6 +92245,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             const combined = new MediaStream();
                             const vt = videoStream.getVideoTracks()[0];
                             if (vt) {
+                                try { if ('contentHint' in vt) vt.contentHint = 'detail'; } catch (_) {}
                                 st.videoTrack = vt;
                                 combined.addTrack(vt);
                             }
@@ -93232,6 +93252,58 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     createNotification('接続方式のお知らせ', '現在、P2P + STUN による直接暗号化接続を優先しています。', 'info', 4, null, null, 'connect');
                 };
 
+                function _getCameraConstraints(withHd = true) {
+                    return withHd
+                        ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
+                        : { facingMode: 'user' };
+                }
+
+                async function _acquireUserMedia(wantAudio, wantVideo) {
+                    const audioOpt = wantAudio ? { echoCancellation: true, noiseSuppression: true } : false;
+                    if (!wantVideo) {
+                        return navigator.mediaDevices.getUserMedia({ audio: audioOpt, video: false });
+                    }
+                    try {
+                        return await navigator.mediaDevices.getUserMedia({ audio: audioOpt, video: _getCameraConstraints(true) });
+                    } catch (e) {
+                        if (e && (e.name === 'OverconstrainedError' || e.name === 'ConstraintNotSatisfiedError')) {
+                            return await navigator.mediaDevices.getUserMedia({ audio: audioOpt, video: _getCameraConstraints(false) });
+                        }
+                        throw e;
+                    }
+                }
+
+                async function _applyVideoSenderQuality(sender, kind = 'camera') {
+                    if (!sender) return;
+                    try {
+                        if (sender.track && 'contentHint' in sender.track) {
+                            sender.track.contentHint = (kind === 'screen') ? 'detail' : 'motion';
+                        }
+                    } catch (_) {}
+                    if (typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+                    try {
+                        const params = sender.getParameters() || {};
+                        if (!Array.isArray(params.encodings) || params.encodings.length === 0) {
+                            params.encodings = [{}];
+                        }
+                        params.encodings[0].maxBitrate = (kind === 'screen') ? 2500000 : 1500000;
+                        params.encodings[0].scaleResolutionDownBy = 1;
+                        params.degradationPreference = (kind === 'screen') ? 'maintain-resolution' : 'balanced';
+                        try {
+                            await sender.setParameters(params);
+                        } catch (_) {
+                            // 一部ブラウザが degradationPreference に未対応な場合は bitrate のみ適用
+                            delete params.degradationPreference;
+                            await sender.setParameters(params);
+                        }
+                    } catch (_) {}
+                }
+
+                function _applyAllVideoSenderQualities() {
+                    if (screenSender) _applyVideoSenderQuality(screenSender, 'screen');
+                    if (cameraSender) _applyVideoSenderQuality(cameraSender, 'camera');
+                }
+
                 async function createPeerConnection(partnerEmail) {
                     if (peerConnection) {
                         peerConnection.close();
@@ -93269,6 +93341,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                         console.log(`🔗 接続状態が変化: ${peerConnection.connectionState}`);
                         if (peerConnection.connectionState === 'connected') {
                             _clearPcDisconnectTimer();
+                            _applyAllVideoSenderQualities();
                             manageCallUI(true, '通話中');
                             stopAllSounds();
                             setTimeout(checkConnectionType, 900);
@@ -93288,8 +93361,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     if (localStream) {
                         localStream.getTracks().forEach(track => {
                             const s = peerConnection.addTrack(track, localStream);
-                            if (track.kind === 'video') cameraSender = s;
-                            else if (track.kind === 'audio') micAudioSender = s;
+                            if (track.kind === 'video') {
+                                cameraSender = s;
+                                _applyVideoSenderQuality(s, 'camera');
+                            } else if (track.kind === 'audio') micAudioSender = s;
                         });
                     }
                 }
@@ -93719,7 +93794,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                 existingCam.enabled = true;
                             } else {
                                 try {
-                                    const vs = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                                    const vs = await _acquireUserMedia(false, true);
                                     const ct = vs.getVideoTracks()[0];
                                     if (ct) {
                                         localStream.addTrack(ct);
@@ -93729,6 +93804,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                             cameraSender = peerConnection.addTrack(ct, localStream);
                                             needRenegotiate = true;
                                         }
+                                        _applyVideoSenderQuality(cameraSender, 'camera');
                                     }
                                 } catch (e) {
                                     isCameraEnabled = false;
@@ -93857,6 +93933,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             screenSender = peerConnection.addTrack(screenVideoTrack, screenStream);
                             needRenegotiate = true;
                         }
+                        await _applyVideoSenderQuality(screenSender, 'screen');
 
                         const osAudioTrack = captured.getAudioTracks()[0];
                         if (osAudioTrack) {
@@ -93875,6 +93952,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                         if (needRenegotiate && callState === 'active') {
                             await _renegotiateOffer('screen');
+                            _applyAllVideoSenderQualities();
                         }
                     } catch (e) {
                         console.error('[VC] 画面共有トラック設定失敗:', e);
@@ -94075,7 +94153,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                     }
                     if (isCameraEnabled && localStream.getVideoTracks().length === 0) {
                         try {
-                            const vs = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                            const vs = await _acquireUserMedia(false, true);
                             const t = vs.getVideoTracks()[0];
                             if (t) {
                                 localStream.addTrack(t);
@@ -94085,6 +94163,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                                     cameraSender = peerConnection.addTrack(t, localStream);
                                     if (callState === 'active') await _renegotiateOffer('camera');
                                 }
+                                _applyVideoSenderQuality(cameraSender, 'camera');
                             }
                         } catch (e) {
                             console.warn('[VC] カメラ取得失敗:', e);
@@ -94208,14 +94287,11 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             const wantCam = !!shareCfg.sendCamera;
                             if (wantMic || wantCam) {
                                 try {
-                                    localStream = await navigator.mediaDevices.getUserMedia({
-                                        audio: wantMic ? { echoCancellation: true, noiseSuppression: true } : false,
-                                        video: wantCam ? { facingMode: 'user' } : false,
-                                    });
+                                    localStream = await _acquireUserMedia(wantMic, wantCam);
                                 } catch (_) {
                                     if (wantMic && wantCam) {
                                         try {
-                                            localStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+                                            localStream = await _acquireUserMedia(true, false);
                                         } catch (__) { localStream = new MediaStream(); }
                                     } else {
                                         localStream = new MediaStream();
@@ -94230,10 +94306,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             isScreenSharing = false;
                             isCameraEnabled = (callType === 'video');
                             isMicEnabled = true;
-                            localStream = await navigator.mediaDevices.getUserMedia({
-                                audio: { echoCancellation: true, noiseSuppression: true },
-                                video: callType === 'video' ? { facingMode: 'user' } : false
-                            });
+                            localStream = await _acquireUserMedia(true, callType === 'video');
                         }
 
                         if (callState !== 'calling') {
@@ -94265,7 +94338,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                         if (callType === 'screen' && screenStream && peerConnection) {
                             const svt = screenStream.getVideoTracks()[0];
-                            if (svt) screenSender = peerConnection.addTrack(svt, screenStream);
+                            if (svt) {
+                                screenSender = peerConnection.addTrack(svt, screenStream);
+                                _applyVideoSenderQuality(screenSender, 'screen');
+                            }
                             const sat = screenStream.getAudioTracks()[0];
                             if (sat) {
                                 try { screenAudioSender = peerConnection.addTrack(sat, screenStream); } catch (_) {}
@@ -94277,6 +94353,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             if (peerConnection.connectionState === 'connected') {
                                 _clearPcDisconnectTimer();
                                 callState = 'active';
+                                _applyAllVideoSenderQualities();
                                 if (currentCallType === 'video') {
                                     _startVideoTimer();
                                     const vcStatus = appWindow?.querySelector('#vc-remote-status');
@@ -94404,10 +94481,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                     try {
                         try {
-                            localStream = await navigator.mediaDevices.getUserMedia({
-                                audio: { echoCancellation: true, noiseSuppression: true },
-                                video: (isVideoCall && !isScreenIncoming) ? { facingMode: 'user' } : false
-                            });
+                            localStream = await _acquireUserMedia(true, !!(isVideoCall && !isScreenIncoming));
                         } catch (mediaErr) {
                             if (isScreenIncoming) {
                                 localStream = new MediaStream();
@@ -94447,6 +94521,7 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
                             if (peerConnection.connectionState === 'connected') {
                                 _clearPcDisconnectTimer();
                                 callState = 'active';
+                                _applyAllVideoSenderQualities();
                                 if (isVideoCall) {
                                     _startVideoTimer();
                                     const vcStatus = appWindow?.querySelector('#vc-remote-status');
@@ -94470,8 +94545,10 @@ body:not(.light-mode) .sys-graph { background:rgba(255,255,255,.05); }
 
                         localStream.getTracks().forEach(track => {
                             const s = peerConnection.addTrack(track, localStream);
-                            if (track.kind === 'video') cameraSender = s;
-                            else if (track.kind === 'audio') micAudioSender = s;
+                            if (track.kind === 'video') {
+                                cameraSender = s;
+                                _applyVideoSenderQuality(s, 'camera');
+                            } else if (track.kind === 'audio') micAudioSender = s;
                         });
 
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallPayload.offer));
@@ -94896,6 +94973,7 @@ const _callSocketHandlers = {};
                                 console.log("📬 [発信側] Answerを受信しました。");
                                 await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
                                 remoteDescriptionSet = true; // ── [追加] リモートSDPがセットされたフラグをON ──
+                                _applyAllVideoSenderQualities();
 
                                 for (const candidate of iceCandidateQueue) {
                                     console.log("溜めておいた道順メモを登録します:", candidate);
